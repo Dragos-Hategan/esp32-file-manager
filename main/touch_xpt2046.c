@@ -228,7 +228,7 @@ bool touch_cal_load_nvs(touch_cal_t *existing_cal)
     return true;
 }
 
-static const int CALIBRATION_MESSAGE_DISPLAY_TIME_MS = 500;
+static const int CALIBRATION_MESSAGE_DISPLAY_TIME_MS = 3000;
 
 void run_5point_touch_calibration(void)
 {
