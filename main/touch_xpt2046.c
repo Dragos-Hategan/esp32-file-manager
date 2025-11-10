@@ -80,7 +80,6 @@ void init_touch(void)
             .mirror_y = TOUCH_MIRROR_Y,
         },
     };
-
     ESP_ERROR_CHECK(esp_lcd_touch_new_spi_xpt2046(tp_io, &tp_cfg, &touch_handle));
 }
 
@@ -156,13 +155,31 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     (void)indev;
 }
 
-lv_indev_t *register_touch_with_lvgl(void)
+/**
+ * @brief Register the touch controller as an LVGL pointer device.
+ *
+ * Creates an LVGL input device, sets it to pointer type, and attaches the
+ * @ref lvgl_touch_read_cb callback.
+ *
+ * @return lv_indev_t* LVGL input device handle.
+ */
+static lv_indev_t *register_touch_with_lvgl(void)
 {
     // LVGL v9:
     lv_indev_t *indev = lv_indev_create();                 // create „input device”
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);       // touch/mouse pointer
     lv_indev_set_read_cb(indev, lvgl_touch_read_cb);       // callback
     return indev;
+}
+
+void register_touch_to_lvgl(void)
+{
+    bsp_display_lock(0); 
+    lv_indev_t *indev = NULL;
+    indev = register_touch_with_lvgl(); 
+    if (indev == NULL) { bsp_display_unlock(); return; }
+    bsp_display_unlock(); 
+    ESP_LOGI("Touch Driver Registration", "XPT2046 touch registered to LVGL");
 }
 
 /**

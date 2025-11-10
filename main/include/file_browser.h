@@ -12,11 +12,11 @@ extern "C" {
 /* ---------------------- SD SPI CONFIG ---------------------- */
 
 #define SD_SPI_MOUNT_POINT      "/sdcard"
-#define SDSPI_DEVICE_CS_PIN     GPIO_NUM_38
-#define SPI_BUS_MOSI_PIN        GPIO_NUM_40
-#define SPI_BUS_MISO_PIN        GPIO_NUM_39
-#define SPI_BUS_SCL_PIN         GPIO_NUM_2
 #define SPI_BUS_HOST            SPI3_HOST
+#define SPI_BUS_SCL_PIN         GPIO_NUM_2
+#define SDSPI_DEVICE_CS_PIN     GPIO_NUM_38
+#define SPI_BUS_MISO_PIN        GPIO_NUM_39
+#define SPI_BUS_MOSI_PIN        GPIO_NUM_40
 #define SDMMC_HOST_MAX_FREQ_KHZ (5 * 1000)
 
 /* ---------------------- SD SPI CONFIG ---------------------- */

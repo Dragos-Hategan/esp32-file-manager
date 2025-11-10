@@ -71,14 +71,21 @@ const touch_cal_t *touch_get_cal(void);
 void init_touch(void);
 
 /**
- * @brief Register the touch controller as an LVGL pointer device.
+ * @brief Register the XPT2046 touch controller with LVGL.
  *
- * Creates an LVGL input device, sets it to pointer type, and attaches the
- * @ref lvgl_touch_read_cb callback.
+ * Initializes and registers the touch controller as an LVGL input device.
+ * The function locks the display driver during registration to ensure thread safety,
+ * creates the LVGL input device through @ref register_touch_with_lvgl,
+ * and attaches the touch read callback used by LVGL for touch events.
  *
- * @return lv_indev_t* LVGL input device handle.
+ * If device registration fails, the function releases the display lock and exits safely.
+ *
+ * @note This function must be called after LVGL and the display driver
+ *       have been initialized.
+ *
+ * @see register_touch_with_lvgl
  */
-lv_indev_t *register_touch_with_lvgl(void);
+void register_touch_to_lvgl(void);
 
 /**
  * @brief Save a valid touch calibration to NVS with CRC protection.

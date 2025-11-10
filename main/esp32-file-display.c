@@ -32,19 +32,12 @@ static void my_task_function(void *arg)
     bsp_display_backlight_on(); 
     freeStack[2] = uxTaskGetStackHighWaterMark(NULL);
 
-    // /* ----- Init touch driver ----- */
-    // //init_touch(); 
-    // freeStack[3] = uxTaskGetStackHighWaterMark(NULL);
+    /* ----- Init and register touch driver ----- */
+    init_touch(); 
+    freeStack[3] = uxTaskGetStackHighWaterMark(NULL);
+    register_touch_to_lvgl();
+    freeStack[4] = uxTaskGetStackHighWaterMark(NULL);
 
-    // /* ----- Register Touch to LVGL ----- */
-    // bsp_display_lock(0); 
-    // lv_indev_t *indev = NULL;
-    // indev = register_touch_with_lvgl(); 
-    // if (indev == NULL) { bsp_display_unlock(); return; }
-    // bsp_display_unlock(); 
-    // ESP_LOGI(TAG, "XPT2046 touch registered to LVGL");
-    // freeStack[4] = uxTaskGetStackHighWaterMark(NULL);
-    
     // /* ----- Calibration Test ----- */
     // if (!calibration_found) {
     //     // No calibration saved: runs calibration directly

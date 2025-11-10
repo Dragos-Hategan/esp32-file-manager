@@ -48,7 +48,7 @@ static void file_browser_on_sort_mode_click(lv_event_t *e);
 static void file_browser_on_sort_dir_click(lv_event_t *e);
 
 static sdmmc_card_t *s_sd_card = NULL;
-static bool s_spi_bus_ready = false;
+static bool s_spi_bus_ready = true; // touch driver is first
 
 void init_sdspi(void)
 {
