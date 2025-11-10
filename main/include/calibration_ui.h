@@ -6,6 +6,25 @@
 #define UI_H
 
 /**
+ * @brief Initializes the NVS (Non-Volatile Storage) and checks for existing touch calibration data.
+ *
+ * This function initializes the ESP-IDF NVS partition. If the initialization fails
+ * due to lack of free pages or version mismatch, it performs a full NVS erase and re-initialization.
+ * Afterward, it attempts to load existing touch calibration data from NVS.
+ *
+ * @param[out] calibration_found  Pointer to a boolean variable that will be set to:
+ *                                - `true` if valid calibration data was found and loaded successfully.
+ *                                - `false` if no calibration data was found, requiring new calibration.
+ *
+ * @note The function prints "Calibrated" or "Needs Calibration" depending on the result.
+ *
+ * @see nvs_flash_init()
+ * @see nvs_flash_erase()
+ * @see touch_cal_load_nvs()
+ */
+void init_nvs(bool *calibration_found);
+
+/**
  * @brief Display a full screen with a centered text message.
  *
  * Places a centered label, updates layout, and forces an immediate refresh.

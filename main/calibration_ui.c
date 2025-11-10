@@ -5,9 +5,24 @@
 #include "freertos/semphr.h"
 
 #include "calibration_ui.h"
+#include "touch_xpt2046.h"
 #include "lvgl.h"
 #include "bsp/esp-bsp.h"
 #include "esp_log.h"
+
+#include "nvs_flash.h"
+
+void init_nvs(bool *calibration_found)
+{
+    esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ESP_ERROR_CHECK(nvs_flash_init());
+    }
+    const touch_cal_t *existing_cal = touch_get_cal();
+    *calibration_found = touch_cal_load_nvs(existing_cal);
+    printf("%s\n", *calibration_found == 1 ? "Calibrated" : "Needs Calibration");
+}
 
 void ui_show_calibration_message(void)
 {

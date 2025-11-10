@@ -9,10 +9,10 @@
 /* ---------------------- XPT2046 TOUCH CONFIG ---------------------- */
 // SPI Config
 #define TOUCH_SPI_HOST      SPI3_HOST
-#define TOUCH_SPI_SCLK_IO   GPIO_NUM_4
-#define TOUCH_CS_IO         GPIO_NUM_5
-#define TOUCH_SPI_MOSI_IO   GPIO_NUM_6
-#define TOUCH_SPI_MISO_IO   GPIO_NUM_7
+#define TOUCH_SPI_SCLK_IO   GPIO_NUM_2
+#define TOUCH_SPI_MISO_IO   GPIO_NUM_39
+#define TOUCH_SPI_MOSI_IO   GPIO_NUM_40
+#define TOUCH_CS_IO         GPIO_NUM_41
 
 // IRQ + RST:
 #define TOUCH_IRQ_IO        GPIO_NUM_1      // active LOW on XPT2046
