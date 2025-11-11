@@ -155,6 +155,14 @@ esp_err_t file_browser_reload(void)
     return ESP_OK;
 }
 
+/**
+ * @brief Build the LVGL screen hierarchy (header + list).
+ *
+ * Creates the root screen and child widgets (path label, sort buttons, list).
+ *
+ * @param[in,out] ctx Browser context (must be non-NULL).
+ * @internal UI construction only; does not query filesystem.
+ */
 static void file_browser_build_screen(file_browser_ctx_t *ctx)
 {
     lv_obj_t *scr = lv_obj_create(NULL);
@@ -195,6 +203,13 @@ static void file_browser_build_screen(file_browser_ctx_t *ctx)
     lv_obj_set_style_pad_all(ctx->list, 0, 0);
 }
 
+/**
+ * @brief Synchronize all UI elements with the current navigation state.
+ *
+ * Updates path, sort badges, and repopulates the list with current entries.
+ *
+ * @param[in,out] ctx Browser context.
+ */
 static void file_browser_sync_view(file_browser_ctx_t *ctx)
 {
     if (!ctx->screen) {
@@ -205,18 +220,36 @@ static void file_browser_sync_view(file_browser_ctx_t *ctx)
     file_browser_populate_list(ctx);
 }
 
+/**
+ * @brief Update the path label from the current navigator path.
+ *
+ * @param[in,out] ctx Browser context.
+ */
 static void file_browser_update_path_label(file_browser_ctx_t *ctx)
 {
     const char *path = fs_nav_current_path(&ctx->nav);
     lv_label_set_text(ctx->path_label, path ? path : "-");
 }
 
+/**
+ * @brief Update the sort mode and direction badges.
+ *
+ * @param[in,out] ctx Browser context.
+ */
 static void file_browser_update_sort_badges(file_browser_ctx_t *ctx)
 {
     lv_label_set_text(ctx->sort_mode_label, file_browser_sort_mode_text(fs_nav_get_sort(&ctx->nav)));
     lv_label_set_text(ctx->sort_dir_label, fs_nav_is_sort_ascending(&ctx->nav) ? LV_SYMBOL_UP : LV_SYMBOL_DOWN);
 }
 
+/**
+ * @brief Rebuild the entry list from current directory contents.
+ *
+ * Adds a parent navigation item (if applicable) and then one button per entry.
+ * For files, a formatted size is shown; for directories, "Folder" is shown.
+ *
+ * @param[in,out] ctx Browser context.
+ */
 static void file_browser_populate_list(file_browser_ctx_t *ctx)
 {
     lv_obj_clean(ctx->list);
@@ -256,6 +289,12 @@ static void file_browser_populate_list(file_browser_ctx_t *ctx)
     }
 }
 
+/**
+ * @brief Convert a sort mode enum to human-readable text.
+ *
+ * @param mode Sort mode.
+ * @return Constant C-string: "Name", "Date", or "Size".
+ */
 static const char *file_browser_sort_mode_text(fs_nav_sort_mode_t mode)
 {
     switch (mode) {
@@ -269,6 +308,15 @@ static const char *file_browser_sort_mode_text(fs_nav_sort_mode_t mode)
     }
 }
 
+/**
+ * @brief Format a byte size into a short human-friendly string.
+ *
+ * Uses B/KB/MB/GB up to 1 decimal place for KB or larger.
+ *
+ * @param bytes   Size in bytes.
+ * @param[out] out Output buffer for the formatted text.
+ * @param out_len Length of @p out.
+ */
 static void file_browser_format_size(size_t bytes, char *out, size_t out_len)
 {
     static const char *suffixes[] = {"B", "KB", "MB", "GB"};
@@ -285,6 +333,14 @@ static void file_browser_format_size(size_t bytes, char *out, size_t out_len)
     }
 }
 
+/**
+ * @brief Entry click handler: enter directories or log selected file.
+ *
+ * If the clicked entry is a directory, enters it and refreshes the view.
+ * If it is a file, only logs selection.
+ *
+ * @param e LVGL event (CLICKED) with user data = @c file_browser_ctx_t*.
+ */
 static void file_browser_on_entry_click(lv_event_t *e)
 {
     file_browser_ctx_t *ctx = lv_event_get_user_data(e);
@@ -314,6 +370,11 @@ static void file_browser_on_entry_click(lv_event_t *e)
     }
 }
 
+/**
+ * @brief Parent button handler: go up one level (if possible).
+ *
+ * @param e LVGL event (CLICKED) with user data = @c file_browser_ctx_t*.
+ */
 static void file_browser_on_parent_click(lv_event_t *e)
 {
     file_browser_ctx_t *ctx = lv_event_get_user_data(e);
@@ -329,6 +390,13 @@ static void file_browser_on_parent_click(lv_event_t *e)
     }
 }
 
+/**
+ * @brief Sort-mode button handler: cycle sort mode and refresh list.
+ *
+ * Order cycles through Name → Date → Size (per @c FS_NAV_SORT_COUNT).
+ *
+ * @param e LVGL event (CLICKED) with user data = @c file_browser_ctx_t*.
+ */
 static void file_browser_on_sort_mode_click(lv_event_t *e)
 {
     file_browser_ctx_t *ctx = lv_event_get_user_data(e);
@@ -345,6 +413,11 @@ static void file_browser_on_sort_mode_click(lv_event_t *e)
     }
 }
 
+/**
+ * @brief Sort-direction button handler: toggle ascending/descending and refresh list.
+ *
+ * @param e LVGL event (CLICKED) with user data = @c file_browser_ctx_t*.
+ */
 static void file_browser_on_sort_dir_click(lv_event_t *e)
 {
     file_browser_ctx_t *ctx = lv_event_get_user_data(e);
@@ -359,6 +432,15 @@ static void file_browser_on_sort_dir_click(lv_event_t *e)
     }
 }
 
+/**
+ * @brief Show a minimal error screen when the storage root is not available.
+ *
+ * Used when @c fs_nav_init fails. Shows path and error name.
+ *
+ * @param root_path Root path attempted.
+ * @param err       Error that occurred.
+ * @note Acquires the display lock internally (non-blocking timeout = 0).
+ */
 static void file_browser_show_error_screen(const char *root_path, esp_err_t err)
 {
     if (!bsp_display_lock(0)) {

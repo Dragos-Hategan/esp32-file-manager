@@ -56,7 +56,17 @@ void init_sdspi(void);
  */
 esp_err_t file_browser_start(const file_browser_config_t *cfg);
 
-
+/**
+ * @brief Refresh the current directory view and redraw the list.
+ *
+ * Re-reads directory entries via @c fs_nav_refresh and repopulates the LVGL list.
+ *
+ * @return
+ * - ESP_OK on success
+ * - ESP_ERR_INVALID_STATE if the browser was not started
+ * - Error from @c fs_nav_refresh
+ * - ESP_ERR_TIMEOUT if display lock cannot be acquired
+ */
 esp_err_t file_browser_reload(void);
 
 #ifdef __cplusplus

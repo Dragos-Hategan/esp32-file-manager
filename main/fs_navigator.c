@@ -276,6 +276,15 @@ bool fs_nav_is_sort_ascending(const fs_nav_t *nav)
     return nav ? nav->ascending : true;
 }
 
+/**
+ * @brief Validate a relative path (no leading '/', no '.' or '..' segments).
+ *
+ * Empty string is allowed (root). Slash-separated segments must be non-empty and
+ * not equal to "." or "..".
+ *
+ * @param[in] relative Candidate relative path.
+ * @return true if valid.
+ */
 static bool fs_nav_is_valid_relative(const char *relative)
 {
     if (!relative || relative[0] == '\0') {
@@ -307,6 +316,16 @@ static bool fs_nav_is_valid_relative(const char *relative)
     return true;
 }
 
+/**
+ * @brief Set @c nav->relative (validated & cleaned) and rebuild @c nav->current.
+ *
+ * @param[in,out] nav      Navigator.
+ * @param[in]     relative New relative path (may be NULL or empty for root).
+ * @return
+ * - ESP_OK on success
+ * - ESP_ERR_INVALID_ARG if @p relative is invalid
+ * - ESP_ERR_INVALID_SIZE if paths exceed buffers
+ */
 static esp_err_t fs_nav_set_relative(fs_nav_t *nav, const char *relative)
 {
     const char *clean = relative ? relative : "";
@@ -338,6 +357,11 @@ static esp_err_t fs_nav_set_relative(fs_nav_t *nav, const char *relative)
     return ESP_OK;
 }
 
+/**
+ * @brief Recompute absolute current path from root + relative.
+ *
+ * @param[in,out] nav Navigator.
+ */
 static void fs_nav_update_current_path(fs_nav_t *nav)
 {
     if (nav->relative[0] == '\0') {
@@ -349,6 +373,16 @@ static void fs_nav_update_current_path(fs_nav_t *nav)
     }
 }
 
+/**
+ * @brief qsort comparator for @c fs_nav_entry_t honoring directories-first and sort settings.
+ *
+ * Directories are always grouped before files. Within directories, sorting is by name to keep
+ * navigation intuitive. Files are sorted by current mode (Name/Date/Size). Ties fall back to name.
+ *
+ * @param lhs Pointer to @c fs_nav_entry_t (left).
+ * @param rhs Pointer to @c fs_nav_entry_t (right).
+ * @return Negative/zero/positive per strcmp-style semantics; reversed if descending.
+ */
 static int fs_nav_entry_compare(const void *lhs, const void *rhs)
 {
     const fs_nav_entry_t *a = lhs;
@@ -387,6 +421,13 @@ static int fs_nav_entry_compare(const void *lhs, const void *rhs)
     return s_cmp_ascending ? cmp : -cmp;
 }
 
+/**
+ * @brief Sort the current entries array with current mode and direction.
+ *
+ * Directories are kept together and sorted by name; files follow the chosen mode.
+ *
+ * @param[in,out] nav Navigator (no-op for <2 entries or null array).
+ */
 static void fs_nav_sort_entries(fs_nav_t *nav)
 {
     if (!nav || nav->entry_count < 2 || !nav->entries) {
@@ -397,6 +438,16 @@ static void fs_nav_sort_entries(fs_nav_t *nav)
     qsort(nav->entries, nav->entry_count, sizeof(fs_nav_entry_t), fs_nav_entry_compare);
 }
 
+/**
+ * @brief Persist current relative path and sort settings to NVS.
+ *
+ * Computes CRC32 over blob fields and commits.
+ *
+ * @param[in] nav Navigator.
+ * @return
+ * - ESP_OK on success
+ * - Errors from NVS open/set/commit
+ */
 static esp_err_t fs_nav_store_state(const fs_nav_t *nav)
 {
     nvs_handle_t handle;
@@ -422,6 +473,18 @@ static esp_err_t fs_nav_store_state(const fs_nav_t *nav)
     return err;
 }
 
+/**
+ * @brief Load persisted state (relative path and sort) from NVS and validate it.
+ *
+ * Validates blob size, magic, version, CRC, then applies relative path and sort.
+ * If the restored path doesn't exist anymore, resets to root with @c ESP_ERR_NOT_FOUND.
+ *
+ * @param[in,out] nav Navigator to modify.
+ * @return
+ * - ESP_OK on success
+ * - ESP_ERR_NVS_* / ESP_ERR_INVALID_* on decode/validation failures
+ * - ESP_ERR_NOT_FOUND if restored path no longer exists
+ */
 static esp_err_t fs_nav_load_state(fs_nav_t *nav)
 {
     nvs_handle_t handle;
