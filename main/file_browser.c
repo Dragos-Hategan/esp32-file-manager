@@ -74,7 +74,7 @@ void init_sdspi(void)
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
     host.slot = SDSPI_BUS_HOST;
-    host.max_freq_khz = SDMMC_HOST_MAX_FREQ_KHZ;
+    host.max_freq_khz = SDSPI_MAX_FREQ_KHZ;
 
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     slot_config.host_id = SDSPI_BUS_HOST;
