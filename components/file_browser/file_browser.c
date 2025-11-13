@@ -129,12 +129,12 @@ void init_sdspi(void)
 {
     if (!s_spi_bus_ready) {
         spi_bus_config_t spi_bus_config = {
-            .mosi_io_num = SDSPI_BUS_MOSI_PIN,
-            .miso_io_num = SDSPI_BUS_MISO_PIN,
-            .sclk_io_num = SPSPI_BUS_SCL_PIN,
+            .mosi_io_num = CONFIG_SDSPI_BUS_MOSI_PIN,
+            .miso_io_num = CONFIG_SDSPI_BUS_MISO_PIN,
+            .sclk_io_num = CONFIG_SPSPI_BUS_SCL_PIN,
             .max_transfer_sz = 4096,
         };
-        esp_err_t bus_err = spi_bus_initialize(SDSPI_BUS_HOST, &spi_bus_config, SPI_DMA_CH_AUTO);
+        esp_err_t bus_err = spi_bus_initialize(CONFIG_SDSPI_BUS_HOST, &spi_bus_config, SPI_DMA_CH_AUTO);
         if (bus_err != ESP_OK && bus_err != ESP_ERR_INVALID_STATE) {
             ESP_LOGE(TAG, "Failed to init SDSPI bus: %s", esp_err_to_name(bus_err));
             ESP_ERROR_CHECK(bus_err);
@@ -143,17 +143,17 @@ void init_sdspi(void)
     }
 
     if (s_sd_card) {
-        ESP_LOGI(TAG, "SDSPI already mounted at %s", SDSPI_MOUNT_POINT);
+        ESP_LOGI(TAG, "SDSPI already mounted at %s", CONFIG_SDSPI_MOUNT_POINT);
         return;
     }
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = SDSPI_BUS_HOST;
-    host.max_freq_khz = SDSPI_MAX_FREQ_KHZ;
+    host.slot = CONFIG_SDSPI_BUS_HOST;
+    host.max_freq_khz = CONFIG_SDSPI_MAX_FREQ_KHZ;
 
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_config.host_id = SDSPI_BUS_HOST;
-    slot_config.gpio_cs = SDSPI_DEVICE_CS_PIN;
+    slot_config.host_id = CONFIG_SDSPI_BUS_HOST;
+    slot_config.gpio_cs = CONFIG_SDSPI_DEVICE_CS_PIN;
 
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false,
@@ -161,8 +161,8 @@ void init_sdspi(void)
         .allocation_unit_size = 16 * 1024,
     };
 
-    ESP_LOGI(TAG, "Mounting SDSPI filesystem at %s", SDSPI_MOUNT_POINT);
-    esp_err_t ret = esp_vfs_fat_sdspi_mount(SDSPI_MOUNT_POINT, &host, &slot_config, &mount_config, &s_sd_card);
+    ESP_LOGI(TAG, "Mounting SDSPI filesystem at %s", CONFIG_SDSPI_MOUNT_POINT);
+    esp_err_t ret = esp_vfs_fat_sdspi_mount(CONFIG_SDSPI_MOUNT_POINT, &host, &slot_config, &mount_config, &s_sd_card);
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {
             ESP_LOGE(TAG, "Failed to mount filesystem");
@@ -179,7 +179,7 @@ void init_sdspi(void)
 esp_err_t file_browser_start(void)
 {
     file_browser_config_t browser_cfg = {
-        .root_path = SDSPI_MOUNT_POINT,
+        .root_path = CONFIG_SDSPI_MOUNT_POINT,
         .max_entries = 512,
     };
 
