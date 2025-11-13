@@ -1,13 +1,13 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 
 #include "esp_err.h"
 #include "lvgl.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /**
  * @brief Callback invoked when the legacy text editor closes.

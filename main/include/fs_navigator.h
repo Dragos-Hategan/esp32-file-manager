@@ -1,15 +1,14 @@
-// main/fs_nav.h
 #pragma once
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <time.h>
 
 #include "esp_err.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #define FS_NAV_MAX_PATH 256
 #define FS_NAV_MAX_NAME 96

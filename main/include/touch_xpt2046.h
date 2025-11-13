@@ -1,6 +1,8 @@
-// touch_xpt2046.h
-#ifndef TOUCH_XPT2046_H
-#define TOUCH_XPT2046_H
+#pragma once
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include "driver/spi_master.h"
 #include "esp_lcd_touch.h"
@@ -89,4 +91,6 @@ lv_indev_t *touch_get_indev(void);
  */
 esp_lcd_touch_handle_t touch_get_handle(void);
 
-#endif // TOUCH_XPT2046_H
+#ifdef __cplusplus
+}
+#endif

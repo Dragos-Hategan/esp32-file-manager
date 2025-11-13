@@ -1,8 +1,3 @@
-/**
- * @file text_viewer_screen.c
- * @brief Shared LVGL screen for viewing and editing text files.
- */
-
 #include "text_viewer_screen.h"
 
 #include <stdlib.h>

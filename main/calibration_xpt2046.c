@@ -1,3 +1,5 @@
+#include "calibration_xpt2046.h"
+
 #include <string.h>
 #include <math.h>
 
@@ -8,7 +10,6 @@
 #include "esp_log.h"
 #include "nvs.h"
 
-#include "calibration_xpt2046.h"
 #include "touch_xpt2046.h"
 
 static const int CALIBRATION_MESSAGE_DISPLAY_TIME_MS = 3000;
@@ -191,7 +192,7 @@ void load_nvs_calibration(bool *calibration_found)
 {
     const touch_cal_t *existing_cal = &s_cal;
     *calibration_found = touch_cal_load_nvs(existing_cal);
-    printf("%s\n", *calibration_found == 1 ? "Calibrated" : "Needs Calibration");
+    ESP_LOGI("Touch Calibration", "%s", *calibration_found ? "Touch driver is already calibrated" : "Touch driver is already needs calibration");
 }
 
 void calibration_test(bool calibration_found)
@@ -301,7 +302,7 @@ static uint32_t crc32_fast(const void *data, size_t len)
 }
 
 /** @brief 5-point calibration target set (screen-space). */
-static cal_point_t cal_point_arrows[5] = {
+static cal_point_t s_cal_points[5] = {
     {20, 20, 0, 0},                             // top left
     {TOUCH_X_MAX - 20, 20, 0, 0},               // top right
     {TOUCH_X_MAX - 20, TOUCH_Y_MAX - 20, 0, 0}, // bottom right
@@ -343,10 +344,10 @@ static void run_5point_touch_calibration(void)
     for (int i = 0; i < 5; i++)
     {
         bsp_display_lock(0);
-        draw_cross(cal_point_arrows[i].tx, cal_point_arrows[i].ty);
+        draw_cross(s_cal_points[i].tx, s_cal_points[i].ty);
         bsp_display_unlock();
 
-        sample_raw(&cal_point_arrows[i].rx, &cal_point_arrows[i].ry);
+        sample_raw(&s_cal_points[i].rx, &s_cal_points[i].ry);
         vTaskDelay(pdMS_TO_TICKS(300));
     }
 
@@ -374,10 +375,10 @@ static void run_5point_touch_calibration(void)
 
     for (int i = 0; i < 5; i++)
     {
-        float x = cal_point_arrows[i].rx;
-        float y = cal_point_arrows[i].ry;
-        float tx = cal_point_arrows[i].tx;
-        float ty = cal_point_arrows[i].ty;
+        float x = s_cal_points[i].rx;
+        float y = s_cal_points[i].ry;
+        float tx = s_cal_points[i].tx;
+        float ty = s_cal_points[i].ty;
 
         Sx += x;
         Sy += y;
@@ -659,18 +660,18 @@ static void event_cb(lv_event_t *e)
 {
     lv_obj_t *btn = lv_event_get_target(e);
     lv_obj_t *label = lv_obj_get_child(btn, 0);
-    msg_box_response_t *msg_respone = (msg_box_response_t *)lv_event_get_user_data(e);
+    msg_box_response_t *msg_response  = (msg_box_response_t *)lv_event_get_user_data(e);
 
     if (strcmp(lv_label_get_text(label), "Yes") == 0)
     {
-        msg_respone->response = true;
+        msg_response ->response = true;
     }
     else if (strcmp(lv_label_get_text(label), "No") == 0)
     {
-        msg_respone->response = false;
+        msg_response ->response = false;
     }
 
-    xSemaphoreGive(msg_respone->xSemaphore);
+    xSemaphoreGive(msg_response ->xSemaphore);
 }
 
 static inline int clampi(int v, int lo, int hi)

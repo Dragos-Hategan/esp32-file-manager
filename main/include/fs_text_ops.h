@@ -1,13 +1,13 @@
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stddef.h>
 
 #include "esp_err.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #define FS_TEXT_MAX_BYTES   (16 * 1024)
 #define FS_TEXT_MAX_PATH    512

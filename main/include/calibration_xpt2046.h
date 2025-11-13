@@ -1,12 +1,15 @@
+#pragma once
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 
 #include "esp_lcd_touch.h"
 #include "bsp/esp-bsp.h"
 #include "lvgl.h"
-
-#ifndef UI_H
-#define UI_H
 
 typedef struct {
     float xA, xB, xC;   // for x' = xA*x + xB*y + xC
@@ -73,4 +76,6 @@ void calibration_test(bool calibration_found);
  */
 void apply_touch_calibration(uint16_t raw_x, uint16_t raw_y, lv_point_t *out_point, int xmax, int ymax);
 
-#endif // UI_H
+#ifdef __cplusplus
+}
+#endif

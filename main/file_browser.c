@@ -1,4 +1,3 @@
-// main/file_browser.c
 #include "file_browser.h"
 
 #include <stdbool.h>
@@ -23,7 +22,6 @@
 #include "fs_text_ops.h"
 #include "text_editor_screen.h"
 #include "text_viewer_screen.h"
-
 
 #define TAG "file_browser"
 
@@ -76,6 +74,19 @@ static void file_browser_populate_list(file_browser_ctx_t *ctx);
 static const char *file_browser_sort_mode_text(fs_nav_sort_mode_t mode);
 static void file_browser_show_error_screen(const char *root_path, esp_err_t err);
 static void file_browser_format_size(size_t bytes, char *out, size_t out_len);
+
+/**
+ * @brief Refresh the current directory view and redraw the list.
+ *
+ * Re-reads directory entries via @c fs_nav_refresh and repopulates the LVGL list.
+ *
+ * @return
+ * - ESP_OK on success
+ * - ESP_ERR_INVALID_STATE if the browser was not started
+ * - Error from @c fs_nav_refresh
+ * - ESP_ERR_TIMEOUT if display lock cannot be acquired
+ */
+static esp_err_t file_browser_reload(void);
 
 static void file_browser_on_entry_click(lv_event_t *e);
 static void file_browser_on_entry_long_press(lv_event_t *e);
@@ -200,7 +211,7 @@ esp_err_t file_browser_start(const file_browser_config_t *cfg)
     return ESP_OK;
 }
 
-esp_err_t file_browser_reload(void)
+static esp_err_t file_browser_reload(void)
 {
     file_browser_ctx_t *ctx = &s_browser;
     if (!ctx->initialized) {

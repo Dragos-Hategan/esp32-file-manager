@@ -1,11 +1,11 @@
 #pragma once
 
-#include "esp_err.h"
-#include "lvgl.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include "esp_err.h"
+#include "lvgl.h"
 
 /**
  * @brief Callback invoked when the viewer screen closes.

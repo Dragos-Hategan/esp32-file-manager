@@ -1,4 +1,3 @@
-// main/fs_nav.c
 #include "fs_navigator.h"
 
 #include <dirent.h>
@@ -17,9 +16,9 @@
 
 #define TAG "fs_nav"
 
+#define FS_NAV_STATE_MAGIC 0x464E4156u
 #define FS_NAV_NVS_NAMESPACE "fsnav"
 #define FS_NAV_NVS_KEY "state_v1"
-#define FS_NAV_STATE_MAGIC 0x464E4156u
 #define FS_NAV_STATE_VERSION 1u
 
 typedef struct {
