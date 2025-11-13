@@ -1,12 +1,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include "esp_log.h"
 #include "bsp/esp-bsp.h"
+#include "esp_log.h"
 
-#include "touch_xpt2046.h"
-#include "calibration_xpt2046.h"
 #include "esp_lcd_touch_xpt2046.h"
+#include "calibration_xpt2046.h"
+#include "touch_xpt2046.h"
 
 static lv_indev_t *touch_indev = NULL;
 static esp_lcd_touch_handle_t touch_handle = NULL;

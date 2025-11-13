@@ -1,15 +1,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_log.h"
-#include "nvs_flash.h"
 
-#include "lv_demos.h"
-#include "lv_examples.h"
 #include "bsp/esp-bsp.h"
+#include "nvs_flash.h"
+#include "esp_log.h"
 
 #include "calibration_xpt2046.h"
 #include "touch_xpt2046.h"
-
 #include "file_browser.h"
 
 static char *TAG = "app_main";

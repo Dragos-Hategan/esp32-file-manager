@@ -2,9 +2,10 @@
 #ifndef TOUCH_XPT2046_H
 #define TOUCH_XPT2046_H
 
-#include "lvgl.h"
-#include "esp_lcd_touch.h"
 #include "driver/spi_master.h"
+#include "esp_lcd_touch.h"
+#include "lvgl.h"
+
 #include "file_browser.h"
 
 /* ---------------------- XPT2046 TOUCH CONFIG ---------------------- */

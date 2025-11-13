@@ -2,8 +2,8 @@
 #include <stdint.h>
 
 #include "esp_lcd_touch.h"
-#include "lvgl.h"
 #include "bsp/esp-bsp.h"
+#include "lvgl.h"
 
 #ifndef UI_H
 #define UI_H
