@@ -32,20 +32,6 @@
 /* ---------------------- XPT2046 TOUCH CONFIG ---------------------- */
 
 /**
- * @brief Get a pointer to the global touch input device created by lv_indev_create().
- *
- * @return lv_indev_t Current touch input device pointer or NULL if not initialized.
- */
-lv_indev_t *touch_get_indev(void);
-
-/**
- * @brief Get the global touch handle created by the XPT2046 driver.
- *
- * @return esp_lcd_touch_handle_t Current touch handle or NULL if not initialized.
- */
-esp_lcd_touch_handle_t touch_get_handle(void);
-
-/**
  * @brief Initialize the SPI bus and create the XPT2046 touch driver.
  *
  * This function sets up the SPI bus used by the XPT2046 touch controller,
@@ -87,5 +73,19 @@ esp_err_t init_touch(void);
  * @note `bsp_display_lock(0)` waits indefinitely for the lock (thread-safe).
  */
 bool register_touch_to_lvgl(void);
+
+/**
+ * @brief Get a pointer to the global touch input device created by lv_indev_create().
+ *
+ * @return lv_indev_t Current touch input device pointer or NULL if not initialized.
+ */
+lv_indev_t *touch_get_indev(void);
+
+/**
+ * @brief Get the global touch handle created by the XPT2046 driver.
+ *
+ * @return esp_lcd_touch_handle_t Current touch handle or NULL if not initialized.
+ */
+esp_lcd_touch_handle_t touch_get_handle(void);
 
 #endif // TOUCH_XPT2046_H

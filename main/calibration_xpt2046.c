@@ -5,25 +5,79 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
+#include "esp_log.h"
 #include "nvs.h"
 
 #include "calibration_xpt2046.h"
 #include "touch_xpt2046.h"
-#include "esp_log.h"
+
+static const int CALIBRATION_MESSAGE_DISPLAY_TIME_MS = 3000;
 
 static touch_cal_t s_cal = {0};
 
-const touch_cal_t *touch_get_cal(void)
+/**
+ * @brief Response container passed to button event callbacks of the Yes/No dialog.
+ */
+typedef struct
 {
-    return &s_cal;
-}
+    SemaphoreHandle_t xSemaphore;
+    bool response;
+} msg_box_response_t;
 
-void load_nvs_calibration(bool *calibration_found)
-{
-    const touch_cal_t *existing_cal = touch_get_cal();
-    *calibration_found = touch_cal_load_nvs(existing_cal);
-    printf("%s\n", *calibration_found == 1 ? "Calibrated" : "Needs Calibration");
-}
+typedef struct{ 
+    int tx;
+    int ty; 
+    int rx;
+    int ry; 
+} cal_point_t;
+
+/**
+ * @brief Load touch calibration from NVS into the internal state.
+ *
+ * Reads the calibration blob, validates magic and CRC, and updates @ref s_cal.
+ *
+ * @param existing_cal Non-NULL pointer (unused for output here; required to keep signature uniform).
+ * @return true if a valid calibration was loaded, false otherwise.
+ */
+static bool touch_cal_load_nvs(const touch_cal_t *existing_cal);
+
+/**
+ * @brief Save a valid touch calibration to NVS with CRC protection.
+ *
+ * Writes a blob identified by @c TOUCH_CAL_NVS_NS / @c TOUCH_CAL_NVS_KEY.
+ * A magic and CRC-32 are included for integrity checks.
+ *
+ * @param cal Pointer to a valid calibration structure (cal->valid must be true).
+ * @return esp_err_t ESP_OK on success or an error code from NVS APIs.
+ */
+static esp_err_t touch_cal_save_nvs(const touch_cal_t *cal);
+
+/**
+ * @brief Compute CRC-32 (poly 0xEDB88320, reflected) over a byte buffer.
+ *
+ * @param data Pointer to data.
+ * @param len  Data length in bytes.
+ * @return uint32_t CRC-32 of the buffer.
+ */
+static uint32_t crc32_fast(const void *data, size_t len);
+
+/**
+ * @brief Run a 5-point on-screen calibration flow and persist the result to NVS.
+ *
+ * Shows a temporary calibration screen, renders crosshairs at 5 targets,
+ * samples raw coordinates, then solves for an affine transform that maps
+ * raw (x,y) to screen (x',y'):
+ * @code
+ * x' = xA*x + xB*y + xC
+ * y' = yA*x + yB*y + yC
+ * @endcode
+ *
+ * The coefficients are solved via least squares over the 5 samples (normal equations),
+ * checking for a near-singular system. On success, @ref s_cal is marked valid and saved.
+ * 
+ * @warning This function assumes there is no LVGL display lock already acquired.
+ */
+static void run_5point_touch_calibration(void);
 
 /**
  * @brief Read raw (x,y) from the touch controller by averaging multiple samples.
@@ -34,52 +88,50 @@ void load_nvs_calibration(bool *calibration_found)
  * @param[out] ry Averaged raw Y.
  * 
  */
-static void sample_raw(int *rx, int *ry)
-{
-    esp_lcd_touch_handle_t touch_handle = touch_get_handle();
-
-    uint32_t sx = 0;
-    uint32_t sy = 0;
-    uint32_t n = 0;
-    
-    while (n < 12)
-    {
-        uint16_t x, y;
-        uint8_t btn;
-        esp_lcd_touch_read_data(touch_handle);
-
-        if (esp_lcd_touch_get_coordinates(touch_handle, &x, &y, NULL, &btn, 1))
-        {
-            sx += x;
-            sy += y;
-            n++;
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(15));
-    }
-    *rx = sx / n;
-    *ry = sy / n;
-}
+static void sample_raw(int *rx, int *ry);
 
 /**
- * @brief Create an LVGL line object with a given point array and optional style.
+ * @brief Display a full screen with a centered text message.
  *
- * Convenience wrapper around @c lv_line_create and @c lv_line_set_points.
+ * Places a centered label, updates layout, and forces an immediate refresh.
  *
- * @param parent Parent LVGL object.
- * @param pts    Pointer to an array of points (in screen coordinates).
- * @param cnt    Number of points in @p pts.
- * @param style  Optional style to apply to the line (can be NULL).
+ * @param txt Null-terminated string to show in the center.
  *
- * @note Static helper; not intended to be used outside this module.
+ * @note Runs on the LVGL thread/context; make sure your platform’s display
+ *       locking rules are respected before calling if required.
  */
-static void make_line(lv_obj_t *parent, const lv_point_precise_t *pts, uint16_t cnt, const lv_style_t *style)
-{
-    lv_obj_t *l = lv_line_create(parent);
-    if (style)
-        lv_obj_add_style(l, style, 0);
-    lv_line_set_points(l, pts, cnt);
-}
+static void ui_show_calibration_message(void);
+
+/**
+ * @brief Show a modal Yes/No dialog with a 5-second auto-Yes countdown.
+ *
+ * Creates an LVGL message box centered on the active screen with the provided
+ * question text and two buttons: **Yes** and **No**. Under the dialog it
+ * displays a compact container with the text "Performing Calibration" plus a
+ * circular progress arc and a numeric countdown (5 → 1).  
+ * The function blocks the calling task until the user presses a button or the
+ * 5-second timeout elapses. On timeout, the result is treated as **Yes**.
+ *
+ * Thread-safety: internal calls to @ref bsp_display_lock / @ref bsp_display_unlock
+ * protect LVGL operations. This function must be called from a task context
+ * (not from an ISR) after LVGL has been initialized and a display is active.
+ *
+ * External dependencies:
+ *  - FreeRTOS (semaphores, delays, ticks)
+ *  - LVGL (objects, message box, arc, labels, refresh)
+ *  - A user-provided event callback `event_cb` that writes the button result to
+ *    a @c msg_box_response_t passed via @c user_data and gives the binary semaphore.
+ *
+ * @param question Null-terminated string displayed inside the message box.
+ * @return bool
+ * @retval true  if the user pressed **Yes** or the countdown timed out
+ * @retval false if the user pressed **No** 
+ *
+ * @note The countdown duration is fixed at 5000 ms in this implementation.
+ * @warning The function performs blocking waits (semaphore / vTaskDelay).
+ * @warning This function assumes there is no LVGL display lock already acquired.
+ */
+static bool ui_yes_no_dialog(const char *question);
 
 /**
  * @brief Draw a four-arrow crosshair pointing to a target coordinate.
@@ -93,66 +145,163 @@ static void make_line(lv_obj_t *parent, const lv_point_precise_t *pts, uint16_t 
  *
  * @note Designed for LVGL v9. Adjust types/APIs if using a different LVGL major version.
  */
-static void draw_cross(int x, int y)
+static void draw_cross(int x, int y);
+
+/**
+ * @brief Create an LVGL line object with a given point array and optional style.
+ *
+ * Convenience wrapper around @c lv_line_create and @c lv_line_set_points.
+ *
+ * @param parent Parent LVGL object.
+ * @param pts    Pointer to an array of points (in screen coordinates).
+ * @param cnt    Number of points in @p pts.
+ * @param style  Optional style to apply to the line (can be NULL).
+ *
+ * @note Static helper; not intended to be used outside this module.
+ */
+static void make_line(lv_obj_t *parent, const lv_point_precise_t *pts, uint16_t cnt, const lv_style_t *style);
+
+/**
+ * @brief LVGL button click event handler for the Yes/No dialog.
+ *
+ * Interprets the clicked button by reading its first child label’s text.
+ * Sets the @ref msg_box_response_t::response flag accordingly and gives
+ * the semaphore to wake the waiting task.
+ *
+ * @param e LVGL event descriptor (expects LV_EVENT_CLICKED).
+ *
+ * @pre The event’s user data must be a valid pointer to @ref msg_box_response_t.
+ * @pre The target object must be a button whose first child is a label with text "Yes" or "No".
+ *
+ * @note Static helper; not intended to be called directly outside this module.
+ */
+static void event_cb(lv_event_t *e);
+
+/**
+ * @brief Clamp an integer to a [lo, hi] range.
+ *
+ * @param v  Value to clamp.
+ * @param lo Lower bound (inclusive).
+ * @param hi Upper bound (inclusive).
+ * @return int Clamped value.
+ */
+static inline int clampi(int v, int lo, int hi);
+
+void load_nvs_calibration(bool *calibration_found)
 {
-    lv_obj_t *scr = lv_screen_active();
-    lv_obj_clean(scr); // remove old children
-
-    /* ---- Shared line style (black, width 3) ----- */
-    static lv_style_t st;
-    static bool inited = false;
-    if (!inited)
-    {
-        lv_style_init(&st);
-        lv_style_set_line_width(&st, 3);
-        lv_style_set_line_color(&st, lv_color_black());
-        lv_style_set_line_rounded(&st, false);
-        inited = true;
-    }
-
-    const int gap = 5;  // tip distance from center
-    const int len = 24; // shaft length
-    const int head = 7; // arrow head size
-
-    /* ---- Up arrow (points down toward center) ----- */
-    lv_point_precise_t up_shaft[] = {{x, y - gap - len}, {x, y - gap}};
-    lv_point_precise_t up_head_l[] = {{x, y - gap}, {x - head, y - gap - head}};
-    lv_point_precise_t up_head_r[] = {{x, y - gap}, {x + head, y - gap - head}};
-    make_line(scr, up_shaft, 2, &st);
-    make_line(scr, up_head_l, 2, &st);
-    make_line(scr, up_head_r, 2, &st);
-
-    /* ---- Down arrow (points up toward center) ----- */
-    lv_point_precise_t down_shaft[] = {{x, y + gap + len}, {x, y + gap}};
-    lv_point_precise_t down_head_l[] = {{x, y + gap}, {x - head, y + gap + head}};
-    lv_point_precise_t down_head_r[] = {{x, y + gap}, {x + head, y + gap + head}};
-    make_line(scr, down_shaft, 2, &st);
-    make_line(scr, down_head_l, 2, &st);
-    make_line(scr, down_head_r, 2, &st);
-
-    /* ---- Left arrow (points right toward center) ----- */
-    lv_point_precise_t left_shaft[] = {{x - gap - len, y}, {x - gap, y}};
-    lv_point_precise_t left_head_u[] = {{x - gap, y}, {x - gap - head, y - head}};
-    lv_point_precise_t left_head_d[] = {{x - gap, y}, {x - gap - head, y + head}};
-    make_line(scr, left_shaft, 2, &st);
-    make_line(scr, left_head_u, 2, &st);
-    make_line(scr, left_head_d, 2, &st);
-
-    /* ---- Right arrow (points left toward center) ----- */
-    lv_point_precise_t right_shaft[] = {{x + gap + len, y}, {x + gap, y}};
-    lv_point_precise_t right_head_u[] = {{x + gap, y}, {x + gap + head, y - head}};
-    lv_point_precise_t right_head_d[] = {{x + gap, y}, {x + gap + head, y + head}};
-    make_line(scr, right_shaft, 2, &st);
-    make_line(scr, right_head_u, 2, &st);
-    make_line(scr, right_head_d, 2, &st);
-
-    lv_refr_now(NULL);
+    const touch_cal_t *existing_cal = &s_cal;
+    *calibration_found = touch_cal_load_nvs(existing_cal);
+    printf("%s\n", *calibration_found == 1 ? "Calibrated" : "Needs Calibration");
 }
 
-static const int CALIBRATION_MESSAGE_DISPLAY_TIME_MS = 3000;
+void calibration_test(bool calibration_found)
+{
+    if (!calibration_found) {
+        // No calibration saved: runs calibration directly
+        run_5point_touch_calibration();
+
+    } else {
+        // Run calibration?
+        bool run;
+        run = ui_yes_no_dialog("Run Touch Screen Calibration?");
+
+        if (run) {
+            run_5point_touch_calibration();
+
+        } else {
+            // We keep s_cal from NVS; we just clear the screen
+            bsp_display_lock(0); 
+            lv_obj_clean(lv_screen_active());
+            bsp_display_unlock(); 
+        }
+    }
+}
+
+void apply_touch_calibration(uint16_t raw_x, uint16_t raw_y, lv_point_t *out_point, int xmax, int ymax)
+{
+    if (!s_cal.valid)
+    {
+        out_point->x = clampi(raw_x, 0, xmax - 1);
+        out_point->y = clampi(raw_y, 0, ymax - 1);
+        return;
+    }
+
+    float xf = s_cal.xA * raw_x + s_cal.xB * raw_y + s_cal.xC;
+    float yf = s_cal.yA * raw_x + s_cal.yB * raw_y + s_cal.yC;
+
+    out_point->x = clampi((int)(xf + 0.5f), 0, xmax - 1);
+    out_point->y = clampi((int)(yf + 0.5f), 0, ymax - 1);
+}
+
+static bool touch_cal_load_nvs(const touch_cal_t *existing_cal)
+{
+    if (!existing_cal)
+        return false;
+
+    nvs_handle_t h;
+    if (nvs_open(TOUCH_CAL_NVS_NS, NVS_READONLY, &h) != ESP_OK)
+        return false;
+
+    touch_cal_t blob;
+    size_t sz = sizeof(blob);
+    esp_err_t err = nvs_get_blob(h, TOUCH_CAL_NVS_KEY, &blob, &sz);
+    nvs_close(h);
+    if (err != ESP_OK || sz != sizeof(blob))
+        return false;
+
+    if (blob.magic != 0xC411B007)
+        return false;
+    uint32_t crc = crc32_fast(&blob, sizeof(blob) - sizeof(blob.crc32));
+    if (crc != blob.crc32)
+        return false;
+
+    s_cal.xA = blob.xA;
+    s_cal.xB = blob.xB;
+    s_cal.xC = blob.xC;
+    s_cal.yA = blob.yA;
+    s_cal.yB = blob.yB;
+    s_cal.yC = blob.yC;
+    s_cal.valid = true;
+
+    return true;
+}
+
+static esp_err_t touch_cal_save_nvs(const touch_cal_t *cal)
+{
+    if (!cal || !cal->valid)
+        return ESP_ERR_INVALID_ARG;
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(TOUCH_CAL_NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK)
+        return err;
+
+    touch_cal_t blob = {
+        .xA = cal->xA, .xB = cal->xB, .xC = cal->xC, .yA = cal->yA, .yB = cal->yB, .yC = cal->yC, .magic = 0xC411B007};
+    blob.crc32 = crc32_fast(&blob, sizeof(blob) - sizeof(blob.crc32));
+
+    err = nvs_set_blob(h, TOUCH_CAL_NVS_KEY, &blob, sizeof(blob));
+    if (err == ESP_OK)
+        err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+static uint32_t crc32_fast(const void *data, size_t len)
+{
+    uint32_t crc = 0xFFFFFFFF;
+    const uint8_t *p = (const uint8_t *)data;
+    while (len--)
+    {
+        crc ^= *p++;
+        for (int i = 0; i < 8; i++)
+            crc = (crc >> 1) ^ (0xEDB88320u & (-(int)(crc & 1)));
+    }
+    return ~crc;
+}
 
 /** @brief 5-point calibration target set (screen-space). */
-static cal_point_t CAL_POINT_ARROWS[5] = {
+static cal_point_t cal_point_arrows[5] = {
     {20, 20, 0, 0},                             // top left
     {TOUCH_X_MAX - 20, 20, 0, 0},               // top right
     {TOUCH_X_MAX - 20, TOUCH_Y_MAX - 20, 0, 0}, // bottom right
@@ -160,7 +309,7 @@ static cal_point_t CAL_POINT_ARROWS[5] = {
     {TOUCH_X_MAX / 2, TOUCH_Y_MAX / 2, 0, 0}    // center
 };
 
-void run_5point_touch_calibration(void)
+static void run_5point_touch_calibration(void)
 {
     const char *TAG = "Touch Calibration";
 
@@ -194,10 +343,10 @@ void run_5point_touch_calibration(void)
     for (int i = 0; i < 5; i++)
     {
         bsp_display_lock(0);
-        draw_cross(CAL_POINT_ARROWS[i].tx, CAL_POINT_ARROWS[i].ty);
+        draw_cross(cal_point_arrows[i].tx, cal_point_arrows[i].ty);
         bsp_display_unlock();
 
-        sample_raw(&CAL_POINT_ARROWS[i].rx, &CAL_POINT_ARROWS[i].ry);
+        sample_raw(&cal_point_arrows[i].rx, &cal_point_arrows[i].ry);
         vTaskDelay(pdMS_TO_TICKS(300));
     }
 
@@ -225,10 +374,10 @@ void run_5point_touch_calibration(void)
 
     for (int i = 0; i < 5; i++)
     {
-        float x = CAL_POINT_ARROWS[i].rx;
-        float y = CAL_POINT_ARROWS[i].ry;
-        float tx = CAL_POINT_ARROWS[i].tx;
-        float ty = CAL_POINT_ARROWS[i].ty;
+        float x = cal_point_arrows[i].rx;
+        float y = cal_point_arrows[i].ry;
+        float tx = cal_point_arrows[i].tx;
+        float ty = cal_point_arrows[i].ty;
 
         Sx += x;
         Sy += y;
@@ -283,36 +432,34 @@ void run_5point_touch_calibration(void)
     ESP_LOGI(TAG, "Touch cal saved to NVS: %s", esp_err_to_name(err));
 }
 
-/**
- * @brief Clamp an integer to a [lo, hi] range.
- *
- * @param v  Value to clamp.
- * @param lo Lower bound (inclusive).
- * @param hi Upper bound (inclusive).
- * @return int Clamped value.
- */
-static inline int clampi(int v, int lo, int hi)
+static void sample_raw(int *rx, int *ry)
 {
-    return v < lo ? lo : (v > hi ? hi : v);
-}
+    esp_lcd_touch_handle_t touch_handle = touch_get_handle();
 
-void apply_touch_calibration(uint16_t raw_x, uint16_t raw_y, lv_point_t *out_point, int xmax, int ymax)
-{
-    if (!s_cal.valid)
+    uint32_t sx = 0;
+    uint32_t sy = 0;
+    uint32_t n = 0;
+    
+    while (n < 12)
     {
-        out_point->x = clampi(raw_x, 0, xmax - 1);
-        out_point->y = clampi(raw_y, 0, ymax - 1);
-        return;
+        uint16_t x, y;
+        uint8_t btn;
+        esp_lcd_touch_read_data(touch_handle);
+
+        if (esp_lcd_touch_get_coordinates(touch_handle, &x, &y, NULL, &btn, 1))
+        {
+            sx += x;
+            sy += y;
+            n++;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(15));
     }
-
-    float xf = s_cal.xA * raw_x + s_cal.xB * raw_y + s_cal.xC;
-    float yf = s_cal.yA * raw_x + s_cal.yB * raw_y + s_cal.yC;
-
-    out_point->x = clampi((int)(xf + 0.5f), 0, xmax - 1);
-    out_point->y = clampi((int)(yf + 0.5f), 0, ymax - 1);
+    *rx = sx / n;
+    *ry = sy / n;
 }
 
-void ui_show_calibration_message(void)
+static void ui_show_calibration_message(void)
 {
     lv_obj_t *scr = lv_screen_active();
     lv_obj_clean(scr);
@@ -329,48 +476,7 @@ void ui_show_calibration_message(void)
     lv_refr_now(NULL);
 }
 
-/**
- * @brief Response container passed to button event callbacks of the Yes/No dialog.
- */
-typedef struct
-{
-    SemaphoreHandle_t xSemaphore;
-    bool resonse;
-} msg_box_response_t;
-
-/**
- * @brief LVGL button click event handler for the Yes/No dialog.
- *
- * Interprets the clicked button by reading its first child label’s text.
- * Sets the @ref msg_box_response_t::resonse flag accordingly and gives
- * the semaphore to wake the waiting task.
- *
- * @param e LVGL event descriptor (expects LV_EVENT_CLICKED).
- *
- * @pre The event’s user data must be a valid pointer to @ref msg_box_response_t.
- * @pre The target object must be a button whose first child is a label with text "Yes" or "No".
- *
- * @note Static helper; not intended to be called directly outside this module.
- */
-static void event_cb(lv_event_t *e)
-{
-    lv_obj_t *btn = lv_event_get_target(e);
-    lv_obj_t *label = lv_obj_get_child(btn, 0);
-    msg_box_response_t *msg_respone = (msg_box_response_t *)lv_event_get_user_data(e);
-
-    if (strcmp(lv_label_get_text(label), "Yes") == 0)
-    {
-        msg_respone->resonse = true;
-    }
-    else if (strcmp(lv_label_get_text(label), "No") == 0)
-    {
-        msg_respone->resonse = false;
-    }
-
-    xSemaphoreGive(msg_respone->xSemaphore);
-}
-
-bool ui_yes_no_dialog(const char *question)
+static bool ui_yes_no_dialog(const char *question)
 {
     bsp_display_lock(0); 
 
@@ -388,7 +494,7 @@ bool ui_yes_no_dialog(const char *question)
 
     msg_box_response_t msg_box_response = {
         .xSemaphore = xSemaphoreCreateBinary(),
-        .resonse = false};
+        .response = false};
 
     lv_obj_t *btn;
     btn = lv_msgbox_add_footer_button(mbox1, "Yes");
@@ -446,7 +552,7 @@ bool ui_yes_no_dialog(const char *question)
         uint32_t elapsed_ms = elapsed_ticks * portTICK_PERIOD_MS;
 
         if (elapsed_ticks >= timeout_ticks) {
-            msg_box_response.resonse = true;
+            msg_box_response.response = true;
             break;
         }
 
@@ -482,102 +588,92 @@ bool ui_yes_no_dialog(const char *question)
 
     vSemaphoreDelete(msg_box_response.xSemaphore);
 
-    return msg_box_response.resonse;
+    return msg_box_response.response;
 }
 
-void calibration_test(bool calibration_found)
+static void draw_cross(int x, int y)
 {
-    if (!calibration_found) {
-        // No calibration saved: runs calibration directly
-        run_5point_touch_calibration();
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_clean(scr); // remove old children
 
-    } else {
-        // Run calibration?
-        bool run;
-        run = ui_yes_no_dialog("Run Touch Screen Calibration?");
-
-        if (run) {
-            run_5point_touch_calibration();
-
-        } else {
-            // We keep s_cal from NVS; we just clear the screen
-            bsp_display_lock(0); 
-            lv_obj_clean(lv_screen_active());
-            bsp_display_unlock(); 
-        }
-    }
-}
-
-/**
- * @brief Compute CRC-32 (poly 0xEDB88320, reflected) over a byte buffer.
- *
- * @param data Pointer to data.
- * @param len  Data length in bytes.
- * @return uint32_t CRC-32 of the buffer.
- */
-static uint32_t crc32_fast(const void *data, size_t len)
-{
-    uint32_t crc = 0xFFFFFFFF;
-    const uint8_t *p = (const uint8_t *)data;
-    while (len--)
+    /* ---- Shared line style (black, width 3) ----- */
+    static lv_style_t st;
+    static bool inited = false;
+    if (!inited)
     {
-        crc ^= *p++;
-        for (int i = 0; i < 8; i++)
-            crc = (crc >> 1) ^ (0xEDB88320u & (-(int)(crc & 1)));
+        lv_style_init(&st);
+        lv_style_set_line_width(&st, 3);
+        lv_style_set_line_color(&st, lv_color_black());
+        lv_style_set_line_rounded(&st, false);
+        inited = true;
     }
-    return ~crc;
+
+    const int gap = 5;  // tip distance from center
+    const int len = 24; // shaft length
+    const int head = 7; // arrow head size
+
+    /* ---- Up arrow (points down toward center) ----- */
+    lv_point_precise_t up_shaft[] = {{x, y - gap - len}, {x, y - gap}};
+    lv_point_precise_t up_head_l[] = {{x, y - gap}, {x - head, y - gap - head}};
+    lv_point_precise_t up_head_r[] = {{x, y - gap}, {x + head, y - gap - head}};
+    make_line(scr, up_shaft, 2, &st);
+    make_line(scr, up_head_l, 2, &st);
+    make_line(scr, up_head_r, 2, &st);
+
+    /* ---- Down arrow (points up toward center) ----- */
+    lv_point_precise_t down_shaft[] = {{x, y + gap + len}, {x, y + gap}};
+    lv_point_precise_t down_head_l[] = {{x, y + gap}, {x - head, y + gap + head}};
+    lv_point_precise_t down_head_r[] = {{x, y + gap}, {x + head, y + gap + head}};
+    make_line(scr, down_shaft, 2, &st);
+    make_line(scr, down_head_l, 2, &st);
+    make_line(scr, down_head_r, 2, &st);
+
+    /* ---- Left arrow (points right toward center) ----- */
+    lv_point_precise_t left_shaft[] = {{x - gap - len, y}, {x - gap, y}};
+    lv_point_precise_t left_head_u[] = {{x - gap, y}, {x - gap - head, y - head}};
+    lv_point_precise_t left_head_d[] = {{x - gap, y}, {x - gap - head, y + head}};
+    make_line(scr, left_shaft, 2, &st);
+    make_line(scr, left_head_u, 2, &st);
+    make_line(scr, left_head_d, 2, &st);
+
+    /* ---- Right arrow (points left toward center) ----- */
+    lv_point_precise_t right_shaft[] = {{x + gap + len, y}, {x + gap, y}};
+    lv_point_precise_t right_head_u[] = {{x + gap, y}, {x + gap + head, y - head}};
+    lv_point_precise_t right_head_d[] = {{x + gap, y}, {x + gap + head, y + head}};
+    make_line(scr, right_shaft, 2, &st);
+    make_line(scr, right_head_u, 2, &st);
+    make_line(scr, right_head_d, 2, &st);
+
+    lv_refr_now(NULL);
 }
 
-esp_err_t touch_cal_save_nvs(const touch_cal_t *cal)
+static void make_line(lv_obj_t *parent, const lv_point_precise_t *pts, uint16_t cnt, const lv_style_t *style)
 {
-    if (!cal || !cal->valid)
-        return ESP_ERR_INVALID_ARG;
-
-    nvs_handle_t h;
-    esp_err_t err = nvs_open(TOUCH_CAL_NVS_NS, NVS_READWRITE, &h);
-    if (err != ESP_OK)
-        return err;
-
-    touch_cal_t blob = {
-        .xA = cal->xA, .xB = cal->xB, .xC = cal->xC, .yA = cal->yA, .yB = cal->yB, .yC = cal->yC, .magic = 0xC411B007};
-    blob.crc32 = crc32_fast(&blob, sizeof(blob) - sizeof(blob.crc32));
-
-    err = nvs_set_blob(h, TOUCH_CAL_NVS_KEY, &blob, sizeof(blob));
-    if (err == ESP_OK)
-        err = nvs_commit(h);
-    nvs_close(h);
-    return err;
+    lv_obj_t *l = lv_line_create(parent);
+    if (style)
+        lv_obj_add_style(l, style, 0);
+    lv_line_set_points(l, pts, cnt);
 }
 
-bool touch_cal_load_nvs(const touch_cal_t *existing_cal)
+static void event_cb(lv_event_t *e)
 {
-    if (!existing_cal)
-        return false;
+    lv_obj_t *btn = lv_event_get_target(e);
+    lv_obj_t *label = lv_obj_get_child(btn, 0);
+    msg_box_response_t *msg_respone = (msg_box_response_t *)lv_event_get_user_data(e);
 
-    nvs_handle_t h;
-    if (nvs_open(TOUCH_CAL_NVS_NS, NVS_READONLY, &h) != ESP_OK)
-        return false;
+    if (strcmp(lv_label_get_text(label), "Yes") == 0)
+    {
+        msg_respone->response = true;
+    }
+    else if (strcmp(lv_label_get_text(label), "No") == 0)
+    {
+        msg_respone->response = false;
+    }
 
-    touch_cal_t blob;
-    size_t sz = sizeof(blob);
-    esp_err_t err = nvs_get_blob(h, TOUCH_CAL_NVS_KEY, &blob, &sz);
-    nvs_close(h);
-    if (err != ESP_OK || sz != sizeof(blob))
-        return false;
+    xSemaphoreGive(msg_respone->xSemaphore);
+}
 
-    if (blob.magic != 0xC411B007)
-        return false;
-    uint32_t crc = crc32_fast(&blob, sizeof(blob) - sizeof(blob.crc32));
-    if (crc != blob.crc32)
-        return false;
-
-    s_cal.xA = blob.xA;
-    s_cal.xB = blob.xB;
-    s_cal.xC = blob.xC;
-    s_cal.yA = blob.yA;
-    s_cal.yB = blob.yB;
-    s_cal.yC = blob.yC;
-    s_cal.valid = true;
-
-    return true;
+static inline int clampi(int v, int lo, int hi)
+{
+    return v < lo ? lo : (v > hi ? hi : v);
 }

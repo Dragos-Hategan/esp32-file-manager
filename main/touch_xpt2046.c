@@ -1,25 +1,15 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "esp_log.h"
 #include "bsp/esp-bsp.h"
+
 #include "touch_xpt2046.h"
 #include "calibration_xpt2046.h"
 #include "esp_lcd_touch_xpt2046.h"
-#include "esp_log.h"
 
 static lv_indev_t *touch_indev = NULL;
-
-lv_indev_t *touch_get_indev(void)
-{
-    return touch_indev;
-}
-
 static esp_lcd_touch_handle_t touch_handle = NULL;
-
-esp_lcd_touch_handle_t touch_get_handle(void)
-{
-    return touch_handle;
-}
 
 /**
  * @brief Register the touch controller as an LVGL pointer device.
@@ -127,6 +117,16 @@ bool register_touch_to_lvgl(void)
     ESP_LOGI("Touch Driver Registration", "XPT2046 touch registered to LVGL");
 
     return true;
+}
+
+lv_indev_t *touch_get_indev(void)
+{
+    return touch_indev;
+}
+
+esp_lcd_touch_handle_t touch_get_handle(void)
+{
+    return touch_handle;
 }
 
 static lv_indev_t *register_touch_with_lvgl(void)
