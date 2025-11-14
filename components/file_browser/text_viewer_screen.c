@@ -132,12 +132,18 @@ static void text_viewer_on_text_area_clicked(lv_event_t *e);
 static void text_viewer_on_keyboard_cancel(lv_event_t *e);
 
 /**
+ * @brief Show the keyboard when the filename dialog textarea is tapped.
+ *
+ * @param e LVGL event.
+ */
+static void text_viewer_on_name_textarea_clicked(lv_event_t *e);
+
+/**
  * @brief Trigger Save when the keyboard's OK button is pressed.
  *
  * @param e LVGL event.
  */
 static void text_viewer_on_keyboard_ready(lv_event_t *e);
-static void text_viewer_on_name_textarea_clicked(lv_event_t *e);
 
 /**
  * @brief Hide the keyboard when tapping outside editable widgets.
@@ -195,9 +201,37 @@ static bool text_viewer_validate_name(const char *name);
  */
 static void text_viewer_ensure_txt_extension(char *name, size_t len);
 
+/**
+ * @brief Compose absolute path for a new file.
+ *
+ * @param ctx     Viewer context (requires valid directory).
+ * @param name    Filename to append.
+ * @param out     Destination buffer for resulting path.
+ * @param out_len Size of @p out in bytes.
+ * @return ESP_OK on success or ESP_ERR_* on failure.
+ */
 static esp_err_t text_viewer_compose_new_path(text_viewer_ctx_t *ctx, const char *name, char *out, size_t out_len);
+
+/**
+ * @brief Check if a filesystem path already exists.
+ *
+ * @param path Absolute path to test.
+ * @return true if the path exists, false otherwise.
+ */
 static bool text_viewer_path_exists(const char *path);
+
+/**
+ * @brief Show the filename dialog used when saving a new file.
+ *
+ * @param ctx Viewer context.
+ */
 static void text_viewer_show_name_dialog(text_viewer_ctx_t *ctx);
+
+/**
+ * @brief Close the filename dialog (if present) and restore edit state.
+ *
+ * @param ctx Viewer context.
+ */
 static void text_viewer_close_name_dialog(text_viewer_ctx_t *ctx);
 
 /**
@@ -470,15 +504,6 @@ static void text_viewer_on_text_area_clicked(lv_event_t *e)
     text_viewer_show_keyboard(ctx, ctx->text_area);
 }
 
-static void text_viewer_on_name_textarea_clicked(lv_event_t *e)
-{
-    text_viewer_ctx_t *ctx = lv_event_get_user_data(e);
-    if (!ctx || !ctx->name_textarea) {
-        return;
-    }
-    text_viewer_show_keyboard(ctx, ctx->name_textarea);
-}
-
 static void text_viewer_on_keyboard_cancel(lv_event_t *e)
 {
     text_viewer_ctx_t *ctx = lv_event_get_user_data(e);
@@ -486,6 +511,15 @@ static void text_viewer_on_keyboard_cancel(lv_event_t *e)
         return;
     }
     text_viewer_hide_keyboard(ctx);
+}
+
+static void text_viewer_on_name_textarea_clicked(lv_event_t *e)
+{
+    text_viewer_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx || !ctx->name_textarea) {
+        return;
+    }
+    text_viewer_show_keyboard(ctx, ctx->name_textarea);
 }
 
 static void text_viewer_on_keyboard_ready(lv_event_t *e)
@@ -594,7 +628,12 @@ static bool text_viewer_validate_name(const char *name)
         return false;
     }
     for (const char *p = name; *p; ++p) {
-        if (*p == '/' || *p == '\\' || *p == ':') {
+        if (
+                *p == '\\' || *p == '/' || *p == ':' ||
+                *p == '*'  || *p == '?' || *p == '"' ||
+                *p == '<'  || *p == '>' || *p == '|'
+            ) 
+        {
             return false;
         }
     }
@@ -649,25 +688,6 @@ static bool text_viewer_path_exists(const char *path)
     return stat(path, &st) == 0;
 }
 
-static void text_viewer_close_name_dialog(text_viewer_ctx_t *ctx)
-{
-    if (!ctx || !ctx->name_dialog) {
-        return;
-    }
-    if (ctx->name_textarea) {
-        const char *current = lv_textarea_get_text(ctx->name_textarea);
-        if (current) {
-            strlcpy(ctx->pending_name, current, sizeof(ctx->pending_name));
-        }
-    }
-    lv_msgbox_close(ctx->name_dialog);
-    ctx->name_dialog = NULL;
-    ctx->name_textarea = NULL;
-    lv_obj_clear_state(ctx->text_area, LV_STATE_DISABLED);
-    lv_textarea_set_cursor_click_pos(ctx->text_area, true);
-    text_viewer_hide_keyboard(ctx);
-}
-
 static void text_viewer_show_name_dialog(text_viewer_ctx_t *ctx)
 {
     if (!ctx || !ctx->new_file || !ctx->editable || ctx->name_dialog) {
@@ -720,6 +740,25 @@ static void text_viewer_show_name_dialog(text_viewer_ctx_t *ctx)
         }
     }
     lv_obj_align(dlg, LV_ALIGN_TOP_MID, 0, margin);
+}
+
+static void text_viewer_close_name_dialog(text_viewer_ctx_t *ctx)
+{
+    if (!ctx || !ctx->name_dialog) {
+        return;
+    }
+    if (ctx->name_textarea) {
+        const char *current = lv_textarea_get_text(ctx->name_textarea);
+        if (current) {
+            strlcpy(ctx->pending_name, current, sizeof(ctx->pending_name));
+        }
+    }
+    lv_msgbox_close(ctx->name_dialog);
+    ctx->name_dialog = NULL;
+    ctx->name_textarea = NULL;
+    lv_obj_clear_state(ctx->text_area, LV_STATE_DISABLED);
+    lv_textarea_set_cursor_click_pos(ctx->text_area, true);
+    text_viewer_hide_keyboard(ctx);
 }
 
 static void text_viewer_on_name_dialog(lv_event_t *e)
@@ -850,3 +889,4 @@ static void text_viewer_close(text_viewer_ctx_t *ctx, bool changed)
         ctx->close_cb(changed, ctx->close_ctx);
     }
 }
+
