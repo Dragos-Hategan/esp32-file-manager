@@ -13,8 +13,6 @@
 
 #include "touch_xpt2046.h"
 
-static const int CALIBRATION_MESSAGE_DISPLAY_TIME_MS = 3000;
-
 typedef struct
 {
     float xA, xB, xC; // for x' = xA*x + xB*y + xC
@@ -24,8 +22,6 @@ typedef struct
     uint32_t crc32; // simple, for integrity
 } touch_cal_t;
 
-static touch_cal_t s_cal = {0};
-
 typedef struct
 {
     int tx;
@@ -33,6 +29,15 @@ typedef struct
     int rx;
     int ry;
 } cal_point_t;
+
+typedef struct
+{
+    SemaphoreHandle_t xSemaphore;
+    bool response;
+} msg_box_response_t;
+
+static const int CALIBRATION_MESSAGE_DISPLAY_TIME_MS = 3000;
+static touch_cal_t s_cal = {0};
 
 /** @brief 5-point calibration target set (screen-space). */
 static cal_point_t s_cal_points[5] = {
@@ -42,15 +47,6 @@ static cal_point_t s_cal_points[5] = {
     {20, TOUCH_Y_MAX - 20, 0, 0},               // bottom left
     {TOUCH_X_MAX / 2, TOUCH_Y_MAX / 2, 0, 0}    // center
 };
-
-/**
- * @brief Response container passed to button event callbacks of the Yes/No dialog.
- */
-typedef struct
-{
-    SemaphoreHandle_t xSemaphore;
-    bool response;
-} msg_box_response_t;
 
 /**
  * @brief Load touch calibration from NVS into the internal state.
