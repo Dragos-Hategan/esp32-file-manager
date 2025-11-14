@@ -2,8 +2,11 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <sys/stat.h>
 
 #include "esp_log.h"
+#include "fs_navigator.h"
 #include "fs_text_ops.h"
 
 /**
@@ -14,6 +17,7 @@ typedef struct {
     bool editable;               /**< True if edit mode is enabled */
     bool dirty;                  /**< True if current text differs from original */
     bool suppress_events;        /**< Temporarily disable change detection */
+    bool new_file;               /**< True if creating a new file */
     lv_obj_t *screen;            /**< Root LVGL screen object */
     lv_obj_t *toolbar;           /**< Toolbar container */
     lv_obj_t *path_label;        /**< Label showing the file path */
@@ -23,9 +27,13 @@ typedef struct {
     lv_obj_t *keyboard;          /**< On-screen keyboard */
     lv_obj_t *return_screen;     /**< Screen to return to on close */
     lv_obj_t *confirm_mbox;      /**< Confirmation message box (save/discard) */
+    lv_obj_t *name_dialog;       /**< Filename prompt dialog */
+    lv_obj_t *name_textarea;     /**< Text area used inside filename dialog */
     text_viewer_close_cb_t close_cb;  /**< Optional close callback */
     void *close_ctx;             /**< User context for close callback */
     char path[FS_TEXT_MAX_PATH]; /**< Current file path */
+    char directory[FS_TEXT_MAX_PATH]; /**< Directory used for new files */
+    char pending_name[FS_NAV_MAX_NAME]; /**< Suggested filename for new files */
     char *original_text;         /**< Snapshot of text at load/save time */
 } text_viewer_ctx_t;
 
@@ -97,9 +105,10 @@ static void text_viewer_update_buttons(text_viewer_ctx_t *ctx);
 /**
  * @brief Explicitly show the keyboard in edit mode.
  *
- * @param ctx Viewer context.
+ * @param ctx    Viewer context.
+ * @param target Text area to focus (falls back to main text area if NULL).
  */
-static void text_viewer_show_keyboard(text_viewer_ctx_t *ctx);
+static void text_viewer_show_keyboard(text_viewer_ctx_t *ctx, lv_obj_t *target);
 
 /**
  * @brief Explicitly hide the keyboard and detach it from the textarea.
@@ -128,6 +137,7 @@ static void text_viewer_on_keyboard_cancel(lv_event_t *e);
  * @param e LVGL event.
  */
 static void text_viewer_on_keyboard_ready(lv_event_t *e);
+static void text_viewer_on_name_textarea_clicked(lv_event_t *e);
 
 /**
  * @brief Hide the keyboard when tapping outside editable widgets.
@@ -172,6 +182,30 @@ static void text_viewer_on_save(lv_event_t *e);
  * @param e LVGL event.
  */
 static void text_viewer_on_back(lv_event_t *e);
+
+/*********************************************************************************************/
+
+/**
+ * @brief Validate candidate filename (must end with .txt and contain safe chars).
+ */
+static bool text_viewer_validate_name(const char *name);
+
+/**
+ * @brief Ensure \".txt\" suffix (adds or fixes trailing dot cases).
+ */
+static void text_viewer_ensure_txt_extension(char *name, size_t len);
+
+static esp_err_t text_viewer_compose_new_path(text_viewer_ctx_t *ctx, const char *name, char *out, size_t out_len);
+static bool text_viewer_path_exists(const char *path);
+static void text_viewer_show_name_dialog(text_viewer_ctx_t *ctx);
+static void text_viewer_close_name_dialog(text_viewer_ctx_t *ctx);
+
+/**
+ * @brief Filename dialog button handler.
+ *
+ * @param e LVGL event.
+ */
+static void text_viewer_on_name_dialog(lv_event_t *e);
 
 /*********************************************************************************************/
 
@@ -223,15 +257,30 @@ static void text_viewer_close(text_viewer_ctx_t *ctx, bool changed);
 
 esp_err_t text_viewer_open(const text_viewer_open_opts_t *opts)
 {
-    if (!opts || !opts->path || !opts->return_screen) {
+    if (!opts || !opts->return_screen) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    bool new_file = !opts->path || opts->path[0] == '\0';
+    if (!new_file && !opts->path) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (new_file && (!opts->directory || opts->directory[0] == '\0')) {
         return ESP_ERR_INVALID_ARG;
     }
 
     char *content = NULL;
-    size_t len = 0;
-    esp_err_t err = fs_text_read(opts->path, &content, &len);
-    if (err != ESP_OK) {
-        return err;
+    if (new_file) {
+        content = strdup("");
+        if (!content) {
+            return ESP_ERR_NO_MEM;
+        }
+    } else {
+        size_t len = 0;
+        esp_err_t err = fs_text_read(opts->path, &content, &len);
+        if (err != ESP_OK) {
+            return err;
+        }
     }
 
     text_viewer_ctx_t *ctx = &s_viewer;
@@ -241,27 +290,52 @@ esp_err_t text_viewer_open(const text_viewer_open_opts_t *opts)
 
     text_viewer_close_confirm(ctx);
     ctx->active = true;
-    ctx->editable = opts->editable;
-    ctx->dirty = false;
+    ctx->editable = new_file ? true : opts->editable;
+    ctx->new_file = new_file;
+    ctx->dirty = new_file ? true : false;
     ctx->suppress_events = true;
     ctx->return_screen = opts->return_screen;
     ctx->close_cb = opts->on_close;
     ctx->close_ctx = opts->user_ctx;
-    strlcpy(ctx->path, opts->path, sizeof(ctx->path));
-    lv_label_set_text(ctx->path_label, ctx->path);
+
+    ctx->name_dialog = NULL;
+    ctx->name_textarea = NULL;
+
+    if (new_file) {
+        ctx->path[0] = '\0';
+        strlcpy(ctx->directory, opts->directory, sizeof(ctx->directory));
+        strlcpy(ctx->pending_name, ".txt", sizeof(ctx->pending_name));
+        lv_label_set_text(ctx->path_label, "");
+    } else {
+        ctx->directory[0] = '\0';
+        ctx->pending_name[0] = '\0';
+        strlcpy(ctx->path, opts->path, sizeof(ctx->path));
+        lv_label_set_text(ctx->path_label, ctx->path);
+    }
+
     lv_textarea_set_text(ctx->text_area, content);
     text_viewer_set_original(ctx, content);
     free(content);
     ctx->suppress_events = false;
-    text_viewer_set_status(ctx, ctx->editable ? "Edit mode" : "Viewing");
+    if (ctx->new_file) {
+        text_viewer_set_status(ctx, "New TXT");
+    } else {
+        text_viewer_set_status(ctx, ctx->editable ? "Edit mode" : "View mode");
+    }
     text_viewer_apply_mode(ctx);
     lv_screen_load(ctx->screen);
+    if (ctx->new_file) {
+        lv_textarea_set_cursor_pos(ctx->text_area, 0);
+        lv_obj_add_state(ctx->text_area, LV_STATE_FOCUSED);
+        text_viewer_show_keyboard(ctx, ctx->text_area);
+    }
     return ESP_OK;
 }
 
 static void text_viewer_build_screen(text_viewer_ctx_t *ctx)
 {
     lv_obj_t *scr = lv_obj_create(NULL);
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_all(scr, 6, 0);
     lv_obj_set_style_pad_gap(scr, 6, 0);
     lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
@@ -290,7 +364,12 @@ static void text_viewer_build_screen(text_viewer_ctx_t *ctx)
 
     ctx->status_label = lv_label_create(toolbar);
     lv_label_set_text(ctx->status_label, "");
+    lv_label_set_long_mode(ctx->status_label, LV_LABEL_LONG_CLIP);
     lv_obj_set_flex_grow(ctx->status_label, 1);
+    const lv_font_t *status_font = lv_obj_get_style_text_font(ctx->status_label, LV_PART_MAIN);
+    lv_coord_t status_height = status_font ? status_font->line_height : 18;
+    lv_obj_set_style_min_height(ctx->status_label, status_height, 0);
+    lv_obj_set_style_max_height(ctx->status_label, status_height, 0);
 
     ctx->path_label = lv_label_create(scr);
     lv_label_set_long_mode(ctx->path_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
@@ -356,15 +435,17 @@ static void text_viewer_update_buttons(text_viewer_ctx_t *ctx)
     }
 }
 
-static void text_viewer_show_keyboard(text_viewer_ctx_t *ctx)
+static void text_viewer_show_keyboard(text_viewer_ctx_t *ctx, lv_obj_t *target)
 {
     if (!ctx || !ctx->editable) {
         return;
     }
-    if (lv_obj_has_flag(ctx->keyboard, LV_OBJ_FLAG_HIDDEN)) {
+    if (target) {
+        lv_keyboard_set_textarea(ctx->keyboard, target);
+    } else if (!lv_keyboard_get_textarea(ctx->keyboard)) {
         lv_keyboard_set_textarea(ctx->keyboard, ctx->text_area);
-        lv_obj_clear_flag(ctx->keyboard, LV_OBJ_FLAG_HIDDEN);
     }
+    lv_obj_clear_flag(ctx->keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void text_viewer_hide_keyboard(text_viewer_ctx_t *ctx)
@@ -386,7 +467,16 @@ static void text_viewer_on_text_area_clicked(lv_event_t *e)
     if (!ctx || !ctx->editable) {
         return;
     }
-    text_viewer_show_keyboard(ctx);
+    text_viewer_show_keyboard(ctx, ctx->text_area);
+}
+
+static void text_viewer_on_name_textarea_clicked(lv_event_t *e)
+{
+    text_viewer_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx || !ctx->name_textarea) {
+        return;
+    }
+    text_viewer_show_keyboard(ctx, ctx->name_textarea);
 }
 
 static void text_viewer_on_keyboard_cancel(lv_event_t *e)
@@ -413,11 +503,15 @@ static void text_viewer_on_screen_clicked(lv_event_t *e)
     if (!ctx || !ctx->editable) {
         return;
     }
+    if (ctx->name_dialog) {
+        return;
+    }
     if (lv_obj_has_flag(ctx->keyboard, LV_OBJ_FLAG_HIDDEN)) {
         return;
     }
     lv_obj_t *target = lv_event_get_target(e);
-    if (text_viewer_target_in(ctx->text_area, target) || text_viewer_target_in(ctx->keyboard, target)) {
+    if (text_viewer_target_in(ctx->text_area, target) ||
+        text_viewer_target_in(ctx->keyboard, target)) {
         return;
     }
     text_viewer_hide_keyboard(ctx);
@@ -444,16 +538,29 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
     if (!ctx) {
         return;
     }
+    if (ctx->new_file && ctx->path[0] == '\0') {
+        text_viewer_show_name_dialog(ctx);
+        return;
+    }
+
     const char *text = lv_textarea_get_text(ctx->text_area);
     if (!text) {
         text = "";
     }
-    esp_err_t err = fs_text_write(ctx->path, text, strlen(text));
-    if (err != ESP_OK) {
-        text_viewer_set_status(ctx, esp_err_to_name(err));
-        ESP_LOGE(TAG, "Failed to save %s: %s", ctx->path, esp_err_to_name(err));
+
+    if (ctx->path[0] == '\0') {
+        text_viewer_set_status(ctx, "Missing file name");
         return;
     }
+
+    const char *dest_path = ctx->path;
+    esp_err_t err = fs_text_write(dest_path, text, strlen(text));
+    if (err != ESP_OK) {
+        text_viewer_set_status(ctx, esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to save %s: %s", dest_path, esp_err_to_name(err));
+        return;
+    }
+
     text_viewer_set_original(ctx, text);
     ctx->dirty = false;
     text_viewer_set_status(ctx, "Saved");
@@ -479,14 +586,190 @@ static void text_viewer_on_back(lv_event_t *e)
     text_viewer_close(ctx, false);
 }
 
+/************************************* New-file utilities *************************************/
+
+static bool text_viewer_validate_name(const char *name)
+{
+    if (!name || name[0] == '\0') {
+        return false;
+    }
+    for (const char *p = name; *p; ++p) {
+        if (*p == '/' || *p == '\\' || *p == ':') {
+            return false;
+        }
+    }
+    return fs_text_is_txt(name);
+}
+
+static void text_viewer_ensure_txt_extension(char *name, size_t len)
+{
+    if (!name || len == 0) {
+        return;
+    }
+    size_t n = strlen(name);
+    if (n == 0) {
+        strlcpy(name, ".txt", len);
+        return;
+    }
+    const char *dot = strrchr(name, '.');
+    if (dot && dot[1] != '\0') {
+        if (strcasecmp(dot, ".txt") == 0) {
+            return;
+        }
+        return;
+    }
+    if (n + 4 >= len) {
+        return;
+    }
+    if (dot && dot[1] == '\0') {
+        strlcpy(name + n, "txt", len - n);
+    } else {
+        strlcat(name, ".txt", len);
+    }
+}
+
+static esp_err_t text_viewer_compose_new_path(text_viewer_ctx_t *ctx, const char *name, char *out, size_t out_len)
+{
+    if (!ctx || !name || !out || out_len == 0 || ctx->directory[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    int needed = snprintf(out, out_len, "%s/%s", ctx->directory, name);
+    if (needed < 0 || needed >= (int)out_len) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return ESP_OK;
+}
+
+static bool text_viewer_path_exists(const char *path)
+{
+    if (!path || path[0] == '\0') {
+        return false;
+    }
+    struct stat st = {0};
+    return stat(path, &st) == 0;
+}
+
+static void text_viewer_close_name_dialog(text_viewer_ctx_t *ctx)
+{
+    if (!ctx || !ctx->name_dialog) {
+        return;
+    }
+    if (ctx->name_textarea) {
+        const char *current = lv_textarea_get_text(ctx->name_textarea);
+        if (current) {
+            strlcpy(ctx->pending_name, current, sizeof(ctx->pending_name));
+        }
+    }
+    lv_msgbox_close(ctx->name_dialog);
+    ctx->name_dialog = NULL;
+    ctx->name_textarea = NULL;
+    lv_obj_clear_state(ctx->text_area, LV_STATE_DISABLED);
+    lv_textarea_set_cursor_click_pos(ctx->text_area, true);
+    text_viewer_hide_keyboard(ctx);
+}
+
+static void text_viewer_show_name_dialog(text_viewer_ctx_t *ctx)
+{
+    if (!ctx || !ctx->new_file || !ctx->editable || ctx->name_dialog) {
+        return;
+    }
+    lv_obj_t *dlg = lv_msgbox_create(ctx->screen);
+    ctx->name_dialog = dlg;
+    lv_obj_add_flag(dlg, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_style_max_width(dlg, LV_PCT(65), 0);
+    lv_obj_set_width(dlg, LV_PCT(65));
+
+    lv_obj_t *content = lv_msgbox_get_content(dlg);
+    lv_obj_t *label = lv_label_create(content);
+    lv_label_set_text(label, "File name");
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
+
+    ctx->name_textarea = lv_textarea_create(content);
+    lv_textarea_set_one_line(ctx->name_textarea, true);
+    lv_textarea_set_max_length(ctx->name_textarea, FS_NAV_MAX_NAME - 1);
+    const char *initial = ctx->pending_name[0] ? ctx->pending_name : ".txt";
+    lv_textarea_set_text(ctx->name_textarea, initial);
+    lv_textarea_set_cursor_pos(ctx->name_textarea, 0);
+    lv_obj_add_state(ctx->name_textarea, LV_STATE_FOCUSED);
+    lv_obj_clear_state(ctx->text_area, LV_STATE_FOCUSED);
+    lv_obj_add_state(ctx->text_area, LV_STATE_DISABLED);
+    lv_textarea_set_cursor_click_pos(ctx->text_area, false);
+
+    lv_obj_t *save_btn = lv_msgbox_add_footer_button(dlg, "Save");
+    lv_obj_set_user_data(save_btn, (void *)1);
+    lv_obj_add_event_cb(save_btn, text_viewer_on_name_dialog, LV_EVENT_CLICKED, ctx);
+
+    lv_obj_t *cancel_btn = lv_msgbox_add_footer_button(dlg, "Cancel");
+    lv_obj_set_user_data(cancel_btn, (void *)0);
+    lv_obj_add_event_cb(cancel_btn, text_viewer_on_name_dialog, LV_EVENT_CLICKED, ctx);
+
+    text_viewer_show_keyboard(ctx, ctx->name_textarea);
+    lv_obj_add_event_cb(ctx->name_textarea, text_viewer_on_name_textarea_clicked, LV_EVENT_CLICKED, ctx);
+
+    lv_obj_update_layout(ctx->keyboard);
+    lv_obj_update_layout(dlg);
+    lv_coord_t keyboard_top = lv_obj_get_y(ctx->keyboard);
+    lv_coord_t dialog_h = lv_obj_get_height(dlg);
+    lv_coord_t margin = 10;
+    if (keyboard_top > dialog_h) {
+        lv_coord_t candidate = (keyboard_top - dialog_h) / 2;
+        if (candidate > 0) {
+            margin = candidate;
+        }
+    }
+    lv_obj_align(dlg, LV_ALIGN_TOP_MID, 0, margin);
+}
+
+static void text_viewer_on_name_dialog(lv_event_t *e)
+{
+    text_viewer_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx || !ctx->name_dialog) {
+        return;
+    }
+    bool confirm = (bool)(uintptr_t)lv_obj_get_user_data(lv_event_get_target(e));
+    if (!confirm) {
+        text_viewer_close_name_dialog(ctx);
+        return;
+    }
+
+    const char *raw = ctx->name_textarea ? lv_textarea_get_text(ctx->name_textarea) : "";
+    char name_buf[FS_NAV_MAX_NAME];
+    strlcpy(name_buf, raw ? raw : "", sizeof(name_buf));
+    text_viewer_ensure_txt_extension(name_buf, sizeof(name_buf));
+    if (!text_viewer_validate_name(name_buf)) {
+        text_viewer_set_status(ctx, "Invalid .txt name");
+        return;
+    }
+    esp_err_t compose_err = text_viewer_compose_new_path(ctx, name_buf, ctx->path, sizeof(ctx->path));
+    if (compose_err != ESP_OK) {
+        text_viewer_set_status(ctx, "Path too long");
+        return;
+    }
+    if (text_viewer_path_exists(ctx->path)) {
+        text_viewer_set_status(ctx, "File already exists");
+        return;
+    }
+
+    strlcpy(ctx->pending_name, name_buf, sizeof(ctx->pending_name));
+    ctx->directory[0] = '\0';
+    ctx->new_file = false;
+    lv_label_set_text(ctx->path_label, ctx->path);
+    text_viewer_close_name_dialog(ctx);
+    text_viewer_handle_save(ctx);
+}
+
 static void text_viewer_show_confirm(text_viewer_ctx_t *ctx)
 {
     if (ctx->confirm_mbox) {
         return;
     }
-    lv_obj_t *mbox = lv_msgbox_create(NULL);
+    lv_obj_t *mbox = lv_msgbox_create(ctx->screen);
+    lv_obj_add_flag(mbox, LV_OBJ_FLAG_FLOATING);
     ctx->confirm_mbox = mbox;
     lv_obj_set_style_max_width(mbox, LV_PCT(80), 0);
+    lv_obj_set_width(mbox, LV_PCT(80));
     lv_obj_center(mbox);
 
     lv_obj_t *label = lv_label_create(mbox);
@@ -497,14 +780,17 @@ static void text_viewer_show_confirm(text_viewer_ctx_t *ctx)
 
     lv_obj_t *save_btn = lv_msgbox_add_footer_button(mbox, "Save");
     lv_obj_set_user_data(save_btn, (void *)TEXT_VIEWER_CONFIRM_SAVE);
+    lv_obj_set_flex_grow(save_btn, 1);
     lv_obj_add_event_cb(save_btn, text_viewer_on_confirm, LV_EVENT_CLICKED, ctx);
 
     lv_obj_t *discard_btn = lv_msgbox_add_footer_button(mbox, "Discard");
     lv_obj_set_user_data(discard_btn, (void *)TEXT_VIEWER_CONFIRM_DISCARD);
+    lv_obj_set_flex_grow(discard_btn, 1);
     lv_obj_add_event_cb(discard_btn, text_viewer_on_confirm, LV_EVENT_CLICKED, ctx);
 
     lv_obj_t *cancel_btn = lv_msgbox_add_footer_button(mbox, "Cancel");
     lv_obj_set_user_data(cancel_btn, NULL);
+    lv_obj_set_flex_grow(cancel_btn, 1);
     lv_obj_add_event_cb(cancel_btn, text_viewer_on_confirm, LV_EVENT_CLICKED, ctx);
 }
 
@@ -545,10 +831,14 @@ static void text_viewer_on_confirm(lv_event_t *e)
 static void text_viewer_close(text_viewer_ctx_t *ctx, bool changed)
 {
     text_viewer_close_confirm(ctx);
+    text_viewer_close_name_dialog(ctx);
     ctx->active = false;
     ctx->editable = false;
     ctx->dirty = false;
     ctx->suppress_events = false;
+    ctx->new_file = false;
+    ctx->directory[0] = '\0';
+    ctx->pending_name[0] = '\0';
     lv_keyboard_set_textarea(ctx->keyboard, NULL);
     lv_obj_add_flag(ctx->keyboard, LV_OBJ_FLAG_HIDDEN);
     free(ctx->original_text);

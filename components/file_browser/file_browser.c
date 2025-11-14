@@ -20,7 +20,6 @@
 
 #include "fs_navigator.h"
 #include "fs_text_ops.h"
-#include "text_editor_screen.h"
 #include "text_viewer_screen.h"
 
 #define TAG "file_browser"
@@ -52,13 +51,11 @@ typedef struct {
     lv_obj_t *list;
     lv_obj_t *folder_dialog;
     lv_obj_t *folder_textarea;
-    lv_obj_t *folder_status_label;
     lv_obj_t *folder_keyboard;
     lv_obj_t *action_mbox;
     lv_obj_t *confirm_mbox;
     lv_obj_t *rename_dialog;
     lv_obj_t *rename_textarea;
-    lv_obj_t *rename_status_label;
     lv_obj_t *rename_keyboard;
     file_browser_action_entry_t action_entry;
     bool suppress_click;
@@ -99,10 +96,12 @@ typedef struct {
  static void file_browser_on_new_folder_click(lv_event_t *e);
  static void file_browser_show_folder_dialog(file_browser_ctx_t *ctx);
  static void file_browser_close_folder_dialog(file_browser_ctx_t *ctx);
- static void file_browser_on_folder_create(lv_event_t *e);
- static void file_browser_on_folder_cancel(lv_event_t *e);
- static void file_browser_set_folder_status(file_browser_ctx_t *ctx, const char *msg, bool error);
- static esp_err_t file_browser_create_folder(file_browser_ctx_t *ctx, const char *name);
+static void file_browser_on_folder_create(lv_event_t *e);
+static void file_browser_on_folder_cancel(lv_event_t *e);
+static void file_browser_set_folder_status(file_browser_ctx_t *ctx, const char *msg, bool error);
+static esp_err_t file_browser_create_folder(file_browser_ctx_t *ctx, const char *name);
+static void file_browser_on_folder_keyboard_cancel(lv_event_t *e);
+static void file_browser_on_folder_textarea_clicked(lv_event_t *e);
 
 /**************************************************************************************************/
 
@@ -142,10 +141,12 @@ typedef struct {
 
  static void file_browser_set_rename_status(file_browser_ctx_t *ctx, const char *msg, bool error);
  static void file_browser_show_rename_dialog(file_browser_ctx_t *ctx);
- static void file_browser_close_rename_dialog(file_browser_ctx_t *ctx);
- static void file_browser_on_rename_accept(lv_event_t *e);
- static void file_browser_on_rename_cancel(lv_event_t *e);
- static esp_err_t file_browser_perform_rename(file_browser_ctx_t *ctx, const char *new_name);
+static void file_browser_close_rename_dialog(file_browser_ctx_t *ctx);
+static void file_browser_on_rename_accept(lv_event_t *e);
+static void file_browser_on_rename_cancel(lv_event_t *e);
+static esp_err_t file_browser_perform_rename(file_browser_ctx_t *ctx, const char *new_name);
+static void file_browser_on_rename_keyboard_cancel(lv_event_t *e);
+static void file_browser_on_rename_textarea_clicked(lv_event_t *e);
 
 /**************************************************************************************************/
 
@@ -674,14 +675,15 @@ static void file_browser_on_new_txt_click(lv_event_t *e)
         return;
     }
 
-    text_editor_open_opts_t opts = {
+    text_viewer_open_opts_t opts = {
         .directory = dir,
         .suggested_name = "new_file.txt",
         .return_screen = ctx->screen,
+        .editable = true,
         .on_close = file_browser_editor_closed,
         .user_ctx = ctx,
     };
-    esp_err_t err = text_editor_open(&opts);
+    esp_err_t err = text_viewer_open(&opts);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start new file editor: %s", esp_err_to_name(err));
     }
@@ -751,52 +753,75 @@ static void file_browser_show_folder_dialog(file_browser_ctx_t *ctx)
         return;
     }
 
-    lv_obj_t *overlay = lv_obj_create(ctx->screen);
+    lv_obj_t *overlay = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(overlay);
     lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_opa(overlay, LV_OPA_60, 0);
-    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
-    lv_obj_center(overlay);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_TRANSP, 0);
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
     ctx->folder_dialog = overlay;
 
-    lv_obj_t *card = lv_obj_create(overlay);
-    lv_obj_set_size(card, LV_PCT(80), LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(card, 12, 0);
-    lv_obj_set_style_pad_gap(card, 10, 0);
-    lv_obj_center(card);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_t *dlg = lv_msgbox_create(overlay);
+    lv_obj_add_flag(dlg, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_style_max_width(dlg, LV_PCT(65), 0);
+    lv_obj_set_width(dlg, LV_PCT(65));
 
-    lv_obj_t *title = lv_label_create(card);
-    lv_label_set_text(title, "Create folder");
+    lv_obj_t *content = lv_msgbox_get_content(dlg);
+    lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_left(content, 8, 0);
+    lv_obj_set_style_pad_right(content, 8, 0);
 
-    ctx->folder_status_label = lv_label_create(card);
-    lv_label_set_text(ctx->folder_status_label, "");
+    lv_obj_t *label = lv_label_create(content);
+    lv_label_set_text(label, "Folder name");
+    lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
 
-    ctx->folder_textarea = lv_textarea_create(card);
+    ctx->folder_textarea = lv_textarea_create(content);
     lv_textarea_set_one_line(ctx->folder_textarea, true);
-    lv_textarea_set_placeholder_text(ctx->folder_textarea, "Folder name");
     lv_textarea_set_max_length(ctx->folder_textarea, FS_NAV_MAX_NAME - 1);
-
-    lv_obj_t *buttons = lv_obj_create(card);
-    lv_obj_remove_style_all(buttons);
-    lv_obj_set_flex_flow(buttons, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_gap(buttons, 8, 0);
-
-    lv_obj_t *create_btn = lv_button_create(buttons);
-    lv_obj_t *create_lbl = lv_label_create(create_btn);
-    lv_label_set_text(create_lbl, "Create");
-    lv_obj_set_style_text_align(create_lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_add_event_cb(create_btn, file_browser_on_folder_create, LV_EVENT_CLICKED, ctx);
-
-    lv_obj_t *cancel_btn = lv_button_create(buttons);
-    lv_obj_t *cancel_lbl = lv_label_create(cancel_btn);
-    lv_label_set_text(cancel_lbl, "Cancel");
-    lv_obj_set_style_text_align(cancel_lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_add_event_cb(cancel_btn, file_browser_on_folder_cancel, LV_EVENT_CLICKED, ctx);
+    lv_textarea_set_text(ctx->folder_textarea, "");
+    lv_textarea_set_cursor_pos(ctx->folder_textarea, 0);
+    lv_obj_set_width(ctx->folder_textarea, LV_PCT(100));
 
     ctx->folder_keyboard = lv_keyboard_create(overlay);
     lv_keyboard_set_textarea(ctx->folder_keyboard, ctx->folder_textarea);
+    lv_obj_clear_flag(ctx->folder_keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_state(ctx->folder_textarea, LV_STATE_FOCUSED);
+    lv_obj_add_event_cb(ctx->folder_keyboard, file_browser_on_folder_keyboard_cancel, LV_EVENT_CANCEL, ctx);
+    lv_obj_add_event_cb(ctx->folder_textarea, file_browser_on_folder_textarea_clicked, LV_EVENT_CLICKED, ctx);
+    lv_obj_add_flag(ctx->folder_keyboard, LV_OBJ_FLAG_FLOATING);
+    lv_obj_align(ctx->folder_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    lv_obj_t *save_btn = lv_msgbox_add_footer_button(dlg, "Save");
+    lv_obj_set_user_data(save_btn, (void *)1);
+    lv_obj_set_flex_grow(save_btn, 1);
+    lv_obj_set_style_pad_top(save_btn, 4, 0);
+    lv_obj_set_style_pad_bottom(save_btn, 4, 0);
+    lv_obj_set_style_min_height(save_btn, 32, 0);
+    lv_obj_add_event_cb(save_btn, file_browser_on_folder_create, LV_EVENT_CLICKED, ctx);
+
+    lv_obj_t *cancel_btn = lv_msgbox_add_footer_button(dlg, "Cancel");
+    lv_obj_set_user_data(cancel_btn, (void *)0);
+    lv_obj_set_flex_grow(cancel_btn, 1);
+    lv_obj_set_style_pad_top(cancel_btn, 4, 0);
+    lv_obj_set_style_pad_bottom(cancel_btn, 4, 0);
+    lv_obj_set_style_min_height(cancel_btn, 32, 0);
+    lv_obj_add_event_cb(cancel_btn, file_browser_on_folder_cancel, LV_EVENT_CLICKED, ctx);
+
     lv_obj_add_event_cb(ctx->folder_textarea, file_browser_on_folder_create, LV_EVENT_READY, ctx);
+
+    lv_obj_update_layout(ctx->folder_keyboard);
+    lv_obj_update_layout(dlg);
+    lv_coord_t keyboard_top = lv_obj_get_y(ctx->folder_keyboard);
+    lv_coord_t dialog_h = lv_obj_get_height(dlg);
+    lv_coord_t margin = 10;
+    if (keyboard_top > dialog_h) {
+        lv_coord_t candidate = (keyboard_top - dialog_h) / 2;
+        if (candidate > 10) {
+            margin = candidate;
+        }
+    }
+    lv_obj_align(dlg, LV_ALIGN_TOP_MID, 0, margin);
 }
 
 /**
@@ -815,7 +840,6 @@ static void file_browser_close_folder_dialog(file_browser_ctx_t *ctx)
     lv_obj_del(ctx->folder_dialog);
     ctx->folder_dialog = NULL;
     ctx->folder_textarea = NULL;
-    ctx->folder_status_label = NULL;
     ctx->folder_keyboard = NULL;
 }
 
@@ -831,13 +855,45 @@ static void file_browser_close_folder_dialog(file_browser_ctx_t *ctx)
  */
 static void file_browser_set_folder_status(file_browser_ctx_t *ctx, const char *msg, bool error)
 {
-    if (!ctx->folder_status_label || !msg) {
+    if (!ctx || !ctx->folder_dialog || !msg) {
         return;
     }
-    lv_obj_set_style_text_color(ctx->folder_status_label,
+    lv_obj_t *dlg = lv_obj_get_child(ctx->folder_dialog, 0);
+    if (!dlg) {
+        return;
+    }
+    lv_obj_t *content = lv_msgbox_get_content(dlg);
+    if (!content) {
+        return;
+    }
+    lv_obj_t *title = lv_obj_get_child(content, 0);
+    if (!title) {
+        return;
+    }
+    lv_obj_set_style_text_color(title,
                                 error ? lv_color_hex(0xff6b6b) : lv_color_hex(0xcfd8dc),
                                 0);
-    lv_label_set_text(ctx->folder_status_label, msg);
+    lv_label_set_text(title, msg);
+}
+
+static void file_browser_on_folder_keyboard_cancel(lv_event_t *e)
+{
+    file_browser_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx || !ctx->folder_keyboard) {
+        return;
+    }
+    lv_keyboard_set_textarea(ctx->folder_keyboard, NULL);
+    lv_obj_add_flag(ctx->folder_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void file_browser_on_folder_textarea_clicked(lv_event_t *e)
+{
+    file_browser_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx || !ctx->folder_keyboard || !ctx->folder_textarea) {
+        return;
+    }
+    lv_keyboard_set_textarea(ctx->folder_keyboard, ctx->folder_textarea);
+    lv_obj_clear_flag(ctx->folder_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
 /**
@@ -874,7 +930,7 @@ static void file_browser_on_folder_create(lv_event_t *e)
     if (err != ESP_OK) {
         if (err == ESP_ERR_INVALID_STATE) {
             file_browser_set_folder_status(ctx,
-                                           "Name already exists (FAT is case-insensitive)",
+                                           "Name already exists (WARNING: FAT is case-insensitive)",
                                            true);
         } else {
             file_browser_set_folder_status(ctx, esp_err_to_name(err), true);
@@ -906,7 +962,7 @@ static void file_browser_on_folder_cancel(lv_event_t *e)
 }
 
 /**
- * @brief Set status text and color in the rename dialog.
+ * @brief Set status text and color in the rename dialog using the title label.
  *
  * @param[in,out] ctx Browser context.
  * @param msg         Message text to display (must be non-NULL).
@@ -914,13 +970,25 @@ static void file_browser_on_folder_cancel(lv_event_t *e)
  */
 static void file_browser_set_rename_status(file_browser_ctx_t *ctx, const char *msg, bool error)
 {
-    if (!ctx->rename_status_label || !msg) {
+    if (!ctx || !ctx->rename_dialog || !msg) {
         return;
     }
-    lv_obj_set_style_text_color(ctx->rename_status_label,
+    lv_obj_t *dlg = lv_obj_get_child(ctx->rename_dialog, 0);
+    if (!dlg) {
+        return;
+    }
+    lv_obj_t *content = lv_msgbox_get_content(dlg);
+    if (!content) {
+        return;
+    }
+    lv_obj_t *title = lv_obj_get_child(content, 0);
+    if (!title) {
+        return;
+    }
+    lv_obj_set_style_text_color(title,
                                 error ? lv_color_hex(0xff6b6b) : lv_color_hex(0xcfd8dc),
                                 0);
-    lv_label_set_text(ctx->rename_status_label, msg);
+    lv_label_set_text(title, msg);
 }
 
 /**
@@ -939,52 +1007,73 @@ static void file_browser_show_rename_dialog(file_browser_ctx_t *ctx)
     }
     file_browser_close_rename_dialog(ctx);
 
-    lv_obj_t *overlay = lv_obj_create(ctx->screen);
+    lv_obj_t *overlay = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(overlay);
     lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_opa(overlay, LV_OPA_60, 0);
-    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
-    lv_obj_center(overlay);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_TRANSP, 0);
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
     ctx->rename_dialog = overlay;
 
-    lv_obj_t *card = lv_obj_create(overlay);
-    lv_obj_set_size(card, LV_PCT(80), LV_SIZE_CONTENT);
-    lv_obj_set_style_pad_all(card, 12, 0);
-    lv_obj_set_style_pad_gap(card, 10, 0);
-    lv_obj_center(card);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_t *dlg = lv_msgbox_create(overlay);
+    lv_obj_add_flag(dlg, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_style_max_width(dlg, LV_PCT(65), 0);
+    lv_obj_set_width(dlg, LV_PCT(65));
 
-    lv_obj_t *title = lv_label_create(card);
-    lv_label_set_text(title, "Rename entry");
+    lv_obj_t *content = lv_msgbox_get_content(dlg);
+    lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *label = lv_label_create(content);
+    lv_label_set_text(label, ctx->action_entry.is_dir ? "Folder name" : "File name");
+    lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_style_pad_left(content, 8, 0);
+    lv_obj_set_style_pad_right(content, 8, 0);
 
-    ctx->rename_status_label = lv_label_create(card);
-    lv_label_set_text(ctx->rename_status_label, "");
-
-    ctx->rename_textarea = lv_textarea_create(card);
+    ctx->rename_textarea = lv_textarea_create(content);
     lv_textarea_set_one_line(ctx->rename_textarea, true);
     lv_textarea_set_max_length(ctx->rename_textarea, FS_NAV_MAX_NAME - 1);
     lv_textarea_set_text(ctx->rename_textarea, ctx->action_entry.name);
-
-    lv_obj_t *buttons = lv_obj_create(card);
-    lv_obj_remove_style_all(buttons);
-    lv_obj_set_flex_flow(buttons, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_gap(buttons, 8, 0);
-
-    lv_obj_t *accept_btn = lv_button_create(buttons);
-    lv_obj_t *accept_lbl = lv_label_create(accept_btn);
-    lv_label_set_text(accept_lbl, "Save");
-    lv_obj_set_style_text_align(accept_lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_add_event_cb(accept_btn, file_browser_on_rename_accept, LV_EVENT_CLICKED, ctx);
-
-    lv_obj_t *cancel_btn = lv_button_create(buttons);
-    lv_obj_t *cancel_lbl = lv_label_create(cancel_btn);
-    lv_label_set_text(cancel_lbl, "Cancel");
-    lv_obj_set_style_text_align(cancel_lbl, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_add_event_cb(cancel_btn, file_browser_on_rename_cancel, LV_EVENT_CLICKED, ctx);
+    lv_textarea_set_cursor_pos(ctx->rename_textarea, LV_TEXTAREA_CURSOR_LAST);
+    lv_obj_set_width(ctx->rename_textarea, LV_PCT(100));
 
     ctx->rename_keyboard = lv_keyboard_create(overlay);
     lv_keyboard_set_textarea(ctx->rename_keyboard, ctx->rename_textarea);
+    lv_obj_clear_flag(ctx->rename_keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_state(ctx->rename_textarea, LV_STATE_FOCUSED);
+    lv_obj_add_event_cb(ctx->rename_keyboard, file_browser_on_rename_keyboard_cancel, LV_EVENT_CANCEL, ctx);
+    lv_obj_add_event_cb(ctx->rename_textarea, file_browser_on_rename_textarea_clicked, LV_EVENT_CLICKED, ctx);
     lv_obj_add_event_cb(ctx->rename_textarea, file_browser_on_rename_accept, LV_EVENT_READY, ctx);
+    lv_obj_update_layout(ctx->rename_keyboard);
+    lv_obj_add_flag(ctx->rename_keyboard, LV_OBJ_FLAG_FLOATING);
+    lv_obj_align(ctx->rename_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    lv_obj_t *save_btn = lv_msgbox_add_footer_button(dlg, "Save");
+    lv_obj_set_user_data(save_btn, (void *)1);
+    lv_obj_set_flex_grow(save_btn, 1);
+    lv_obj_set_style_pad_top(save_btn, 4, 0);
+    lv_obj_set_style_pad_bottom(save_btn, 4, 0);
+    lv_obj_set_style_min_height(save_btn, 32, 0);
+    lv_obj_add_event_cb(save_btn, file_browser_on_rename_accept, LV_EVENT_CLICKED, ctx);
+
+    lv_obj_t *cancel_btn = lv_msgbox_add_footer_button(dlg, "Cancel");
+    lv_obj_set_user_data(cancel_btn, (void *)0);
+    lv_obj_set_flex_grow(cancel_btn, 1);
+    lv_obj_set_style_pad_top(cancel_btn, 4, 0);
+    lv_obj_set_style_pad_bottom(cancel_btn, 4, 0);
+    lv_obj_set_style_min_height(cancel_btn, 32, 0);
+    lv_obj_add_event_cb(cancel_btn, file_browser_on_rename_cancel, LV_EVENT_CLICKED, ctx);
+
+    lv_obj_update_layout(dlg);
+    lv_coord_t keyboard_top = lv_obj_get_y(ctx->rename_keyboard);
+    lv_coord_t dialog_h = lv_obj_get_height(dlg);
+    lv_coord_t margin = 10;
+    if (keyboard_top > dialog_h) {
+        lv_coord_t candidate = (keyboard_top - dialog_h) / 2;
+        if (candidate > 10) {
+            margin = candidate;
+        }
+    }
+    lv_obj_align(dlg, LV_ALIGN_TOP_MID, 0, margin);
 }
 
 /**
@@ -1003,7 +1092,6 @@ static void file_browser_close_rename_dialog(file_browser_ctx_t *ctx)
     lv_obj_del(ctx->rename_dialog);
     ctx->rename_dialog = NULL;
     ctx->rename_textarea = NULL;
-    ctx->rename_status_label = NULL;
     ctx->rename_keyboard = NULL;
 }
 
@@ -1471,7 +1559,7 @@ static void file_browser_on_rename_accept(lv_event_t *e)
     if (err != ESP_OK) {
         if (err == ESP_ERR_INVALID_STATE) {
             file_browser_set_rename_status(ctx,
-                                           "Name already exists (FAT is case-insensitive)",
+                                           "Name already exists (WARNING: FAT is case-insensitive)",
                                            true);
         } else {
             file_browser_set_rename_status(ctx, esp_err_to_name(err), true);
@@ -1502,6 +1590,26 @@ static void file_browser_on_rename_cancel(lv_event_t *e)
     }
     file_browser_close_rename_dialog(ctx);
     file_browser_clear_action_state(ctx);
+}
+
+static void file_browser_on_rename_keyboard_cancel(lv_event_t *e)
+{
+    file_browser_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx || !ctx->rename_keyboard) {
+        return;
+    }
+    lv_keyboard_set_textarea(ctx->rename_keyboard, NULL);
+    lv_obj_add_flag(ctx->rename_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void file_browser_on_rename_textarea_clicked(lv_event_t *e)
+{
+    file_browser_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx || !ctx->rename_keyboard || !ctx->rename_textarea) {
+        return;
+    }
+    lv_keyboard_set_textarea(ctx->rename_keyboard, ctx->rename_textarea);
+    lv_obj_clear_flag(ctx->rename_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
 /**
