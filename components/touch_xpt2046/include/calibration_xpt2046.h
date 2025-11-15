@@ -29,25 +29,28 @@ extern "C" {
 void load_nvs_calibration(bool *calibration_found);
 
 /**
- * @brief Run or skip the touch screen calibration process based on stored data.
+ * @brief Run touch screen calibration if needed or requested by the user.
  *
- * This function checks whether valid touch calibration data already exists.
- * If no calibration is found, a 5-point touch calibration is started immediately.
- * If calibration data is available, the user is prompted (via a Yes/No LVGL dialog)
- * to decide whether to run a new calibration.
+ * This helper checks whether a valid calibration was previously found and either:
+ *  - runs the 5-point calibration immediately if @p calibration_found is false, or
+ *  - asks the user (via a yes/no LVGL dialog) whether to run calibration again
+ *    if @p calibration_found is true.
  *
- * When the user chooses not to recalibrate, the existing calibration data
- * (previously loaded from NVS) is kept, and the display is cleared for a clean UI state.
+ * Behavior:
+ *  - If no calibration is found: calls run_5point_touch_calibration().
+ *  - If calibration exists:
+ *      - On "Yes": runs run_5point_touch_calibration().
+ *      - On "No" : keeps the existing calibration (@ref s_cal) and clears
+ *                 the active LVGL screen.
  *
- * @param[in] calibration_found
- *        Indicates whether valid calibration data was loaded from NVS (`true`)
- *        or not (`false`).
+ * @param[in] calibration_found  True if a valid calibration was loaded from NVS,
+ *                               false if no calibration data is available.
  *
- * @note This function assumes that the LVGL UI and display driver are already initialized.
- * @note The function uses @ref bsp_display_lock and @ref bsp_display_unlock to ensure
- *       thread-safe access to the display.
+ * @return ESP_OK                 Calibration flow completed successfully
+ *                                (either run or skipped by user).
+ * @return Other esp_err_t codes  If run_5point_touch_calibration() fails.
  */
-void calibration_test(bool calibration_found);
+esp_err_t calibration_test(bool calibration_found);
 
 /**
  * @brief Apply current touch calibration to a raw (x,y) reading.

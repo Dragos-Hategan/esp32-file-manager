@@ -79,33 +79,53 @@ static esp_err_t touch_cal_save_nvs(const touch_cal_t *cal);
 static uint32_t crc32_fast(const void *data, size_t len);
 
 /**
- * @brief Run a 5-point on-screen calibration flow and persist the result to NVS.
+ * @brief Run a 5-point on-screen touch calibration and persist the result to NVS.
  *
- * Shows a temporary calibration screen, renders crosshairs at 5 targets,
- * samples raw coordinates, then solves for an affine transform that maps
- * raw (x,y) to screen (x',y'):
+ * Displays a temporary LVGL calibration screen, draws crosshair targets at five
+ * predefined positions, and for each target samples raw touch coordinates using
+ * @ref sample_raw(). From the 5 (raw, target) pairs it computes an affine
+ * transform:
  * @code
- * x' = xA*x + xB*y + xC
- * y' = yA*x + yB*y + yC
+ * x' = xA * x + xB * y + xC
+ * y' = yA * x + yB * y + yC
  * @endcode
+ * via a least-squares fit (normal equations). If the system is near-singular,
+ * the calibration is marked invalid and an error is returned.
  *
- * The coefficients are solved via least squares over the 5 samples (normal equations),
- * checking for a near-singular system. On success, @ref s_cal is marked valid and saved.
+ * On success, the computed coefficients are stored in the global calibration
+ * structure @ref s_cal, marked as valid, and saved to NVS with
+ * touch_cal_save_nvs().
  *
- * @warning This function assumes there is no LVGL display lock already acquired.
+ * During calibration, the function:
+ *  - replaces the current LVGL screen with a calibration screen,
+ *  - temporarily disables the LVGL touch input device, and
+ *  - restores the original screen and re-enables input before returning.
+ *
+ * @warning Assumes the caller does not hold the LVGL/BSP display lock.
+ *          This function acquires and releases bsp_display_lock() internally.
+ *
+ * @return ESP_OK                 Calibration completed and saved successfully.
+ * @return ESP_FAIL               Calibration failed due to a singular/ill-conditioned matrix.
+ * @return Other esp_err_t codes  If sampling or saving to NVS fails.
  */
-static void run_5point_touch_calibration(void);
+static esp_err_t run_5point_touch_calibration(void);
 
 /**
- * @brief Read raw (x,y) from the touch controller by averaging multiple samples.
+ * @brief Read averaged raw touch coordinates from the XPT2046 controller.
  *
- * Performs 12 reads spaced by ~15 ms, averages them, and returns integer raw coordinates.
+ * This function performs up to 12 sampling attempts, spaced by ~15 ms.
+ * Only samples where the touch controller reports valid coordinates are used.
+ * The function accumulates the valid samples and returns the averaged raw
+ * (x, y) coordinates through the output parameters.
  *
- * @param[out] rx Averaged raw X.
- * @param[out] ry Averaged raw Y.
+ * @param[out] rx Pointer to an integer where the averaged raw X value will be stored.
+ * @param[out] ry Pointer to an integer where the averaged raw Y value will be stored.
  *
+ * @return ESP_OK on success - ESP_ERR_INVALID_ARG parameter error
+ * @return ESP_FAIL sending command error, slave hasn't ACK the transfer
+ * @return ESP_ERR_TIMEOUT operation timeout because the bus is busy
  */
-static void sample_raw(int *rx, int *ry);
+static esp_err_t sample_raw(int *rx, int *ry);
 
 /**
  * @brief Display a full screen with a centered text message.
@@ -211,12 +231,17 @@ void load_nvs_calibration(bool *calibration_found)
     ESP_LOGI("Touch Calibration", "%s", *calibration_found ? "Touch driver is already calibrated" : "Touch driver is already needs calibration");
 }
 
-void calibration_test(bool calibration_found)
+esp_err_t calibration_test(bool calibration_found)
 {
+    esp_err_t calibration_test_err;
     if (!calibration_found)
     {
         // No calibration saved: runs calibration directly
-        run_5point_touch_calibration();
+        calibration_test_err = run_5point_touch_calibration();
+        if (calibration_test_err != ESP_OK){
+            ESP_LOGE("Calibration Test", "5 point calibration failed: (%s)", esp_err_to_name(calibration_test_err));
+            return calibration_test_err;
+        }
     }
     else
     {
@@ -226,7 +251,11 @@ void calibration_test(bool calibration_found)
 
         if (run)
         {
-            run_5point_touch_calibration();
+            calibration_test_err = run_5point_touch_calibration();
+            if (calibration_test_err != ESP_OK){
+                ESP_LOGE("Calibration Test", "5 point calibration failed: (%s)", esp_err_to_name(calibration_test_err));
+                return calibration_test_err;
+            }
         }
         else
         {
@@ -236,6 +265,8 @@ void calibration_test(bool calibration_found)
             bsp_display_unlock();
         }
     }
+
+    return ESP_OK;
 }
 
 void apply_touch_calibration(uint16_t raw_x, uint16_t raw_y, lv_point_t *out_point, int xmax, int ymax)
@@ -323,9 +354,10 @@ static uint32_t crc32_fast(const void *data, size_t len)
     return ~crc;
 }
 
-static void run_5point_touch_calibration(void)
+static esp_err_t run_5point_touch_calibration(void)
 {
-    const char *TAG = "Touch Calibration";
+    const char *TAG = "5 Point Calibration";
+    esp_err_t calibration_err;
 
     bsp_display_lock(0);
 
@@ -360,7 +392,11 @@ static void run_5point_touch_calibration(void)
         draw_cross(s_cal_points[i].tx, s_cal_points[i].ty);
         bsp_display_unlock();
 
-        sample_raw(&s_cal_points[i].rx, &s_cal_points[i].ry);
+        calibration_err = sample_raw(&s_cal_points[i].rx, &s_cal_points[i].ry);
+        if (calibration_err != ESP_OK){
+            ESP_LOGE(TAG, "Failed to sample calibration data from touch driver: (%s)", esp_err_to_name(calibration_err));
+            return calibration_err;
+        }
         vTaskDelay(pdMS_TO_TICKS(300));
     }
 
@@ -419,8 +455,8 @@ static void run_5point_touch_calibration(void)
         lv_obj_del(cal_scr);
         bsp_display_unlock();
 
-        ESP_LOGW(TAG, "Calibration failed: singular matrix");
-        return;
+        ESP_LOGE(TAG, "Calibration failed: singular matrix");
+        return ESP_FAIL;;
     }
 
     // Coefficients for X
@@ -441,13 +477,19 @@ static void run_5point_touch_calibration(void)
     lv_obj_del(cal_scr);
     bsp_display_unlock();
 
-    esp_err_t err = touch_cal_save_nvs(&s_cal);
-    ESP_ERROR_CHECK(err);
-    ESP_LOGI(TAG, "Touch cal saved to NVS: %s", esp_err_to_name(err));
+    calibration_err = touch_cal_save_nvs(&s_cal);
+    if (calibration_err != ESP_OK){
+        ESP_LOGE(TAG, "Failed to save calibration data to NVS: (%s)", esp_err_to_name(calibration_err));
+        return calibration_err;
+    }
+
+    ESP_LOGI(TAG, "Touch cal saved to NVS");
+    return ESP_OK;
 }
 
-static void sample_raw(int *rx, int *ry)
+static esp_err_t sample_raw(int *rx, int *ry)
 {
+    esp_err_t sample_raw_err = ESP_OK;
     esp_lcd_touch_handle_t touch_handle = touch_get_handle();
 
     uint32_t sx = 0;
@@ -458,7 +500,10 @@ static void sample_raw(int *rx, int *ry)
     {
         uint16_t x, y;
         uint8_t btn;
-        esp_lcd_touch_read_data(touch_handle);
+        sample_raw_err = esp_lcd_touch_read_data(touch_handle);
+        if (sample_raw_err != ESP_OK){
+            ESP_LOGE("Raw Calibration Sample", "Failed to read lcd touch data: (%s)", esp_err_to_name(sample_raw_err));
+        }
 
         if (esp_lcd_touch_get_coordinates(touch_handle, &x, &y, NULL, &btn, 1))
         {
@@ -471,6 +516,8 @@ static void sample_raw(int *rx, int *ry)
     }
     *rx = sx / n;
     *ry = sy / n;
+
+    return ESP_OK;
 }
 
 static void ui_show_calibration_message(void)

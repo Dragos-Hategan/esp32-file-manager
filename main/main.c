@@ -14,6 +14,24 @@ static char *TAG = "app_main";
 #define LOG_MEM_INFO    (0)
 
 /**
+ * @brief Starts the BSP display subsystem and reports the initialization result.
+ *
+ * This function calls `bsp_display_start()` and converts its boolean return
+ * value into an `esp_err_t`.  
+ * 
+ * @return ESP_OK      Display successfully initialized.
+ * @return ESP_FAIL    Display failed to initialize.
+ */
+static esp_err_t bsp_display_start_result(void)
+{
+    if (!bsp_display_start()){
+        ESP_LOGE(TAG, "BSP failed to initialize display.");
+        return ESP_FAIL;
+    } 
+    return ESP_OK;
+}
+
+/**
  * @brief Initialize the Non-Volatile Storage (NVS) flash partition.
  *
  * This function initializes the NVS used for storing persistent configuration
@@ -42,7 +60,7 @@ static esp_err_t init_nvs(void)
 
 static void my_task_function(void *arg)
 {
-    ESP_LOGI(TAG, "LVGL File Display");
+    ESP_LOGI(TAG, "\n\n ********** LVGL File Display ********** \n");
 
     UBaseType_t freeStack[20];
     freeStack[0] = uxTaskGetStackHighWaterMark(NULL);
@@ -52,11 +70,11 @@ static void my_task_function(void *arg)
     freeStack[1] = uxTaskGetStackHighWaterMark(NULL);
 
     /* ----- Init SDSPI ----- */
-    init_sdspi();
+    ESP_ERROR_CHECK(init_sdspi());
     freeStack[2] = uxTaskGetStackHighWaterMark(NULL);
 
     /* ----- Init Display and LVGL ----- */
-    bsp_display_start(); 
+    ESP_ERROR_CHECK(bsp_display_start_result()); 
     ESP_ERROR_CHECK(bsp_display_backlight_on()); 
     freeStack[3] = uxTaskGetStackHighWaterMark(NULL);
 
@@ -64,26 +82,24 @@ static void my_task_function(void *arg)
     ESP_ERROR_CHECK(init_touch()); 
     freeStack[4] = uxTaskGetStackHighWaterMark(NULL);
 
+    /* ----- Register Touch Driver To LVGL ----- */
+    ESP_ERROR_CHECK(register_touch_to_lvgl());
+    freeStack[5] = uxTaskGetStackHighWaterMark(NULL);
+
     /* ----- Load XPT2046 Touch Driver Calibration ----- */
     bool calibration_found;
     load_nvs_calibration(&calibration_found);
-    freeStack[5] = uxTaskGetStackHighWaterMark(NULL);
-
-    /* ----- Register Touch Driver To LVGL ----- */
-    if (!register_touch_to_lvgl()){
-        ESP_LOGE("Touch Driver Registration", "XPT2046 FAILED");
-        return;
-    }
     freeStack[6] = uxTaskGetStackHighWaterMark(NULL);
 
     /* ----- Calibration Test ----- */
-    calibration_test(calibration_found);
+    ESP_ERROR_CHECK(calibration_test(calibration_found));
     freeStack[7] = uxTaskGetStackHighWaterMark(NULL);
 
     /* ----- Launch File Browser ----- */
     esp_err_t fb_err = file_browser_start();
     if (fb_err != ESP_OK) {
         ESP_LOGE(TAG, "File browser failed to start: %s", esp_err_to_name(fb_err));
+        return;
     }
     freeStack[8] = uxTaskGetStackHighWaterMark(NULL);
 

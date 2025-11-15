@@ -41,22 +41,15 @@ extern "C" {
 esp_err_t init_touch(void);
 
 /**
- * @brief Register the XPT2046 touch controller with LVGL.
+ * @brief Registers the XPT2046 touch driver as an LVGL input device.
  *
- * Locks the BSP display (LVGL draw context), creates and registers the touch
- * input device via @ref register_touch_with_lvgl, and then attaches the read
- * callback so LVGL can fetch touch events.
+ * This function locks the display, registers the touch driver with LVGL
+ * using `register_touch_with_lvgl()`, and unlocks the display before returning.
  *
- * The display lock is released on all code paths.
- *
- * @return
- * - true  : touch input device was created/registered successfully
- * - false : registration failed (e.g., driver not initialized or allocation error)
- *
- * @note Must be called after LVGL and the display/panel drivers are initialized.
- * @note `bsp_display_lock(0)` waits indefinitely for the lock (thread-safe).
+ * @return ESP_OK   Touch input device successfully registered.
+ * @return ESP_FAIL Failed to register the touch device (NULL handle).
  */
-bool register_touch_to_lvgl(void);
+esp_err_t register_touch_to_lvgl(void);
 
 /**
  * @brief Get a pointer to the global touch input device created by lv_indev_create().

@@ -62,8 +62,8 @@ typedef struct {
 } file_browser_ctx_t;
 
 static file_browser_ctx_t s_browser;
-static sdmmc_card_t *s_sd_card = NULL;
-static bool s_spi_bus_ready = false;
+static sdmmc_card_t *sd_card_handle = NULL;
+static bool sd_spi_bus_ready = false;
 
 /************************************ UI & Data Refresh Helpers ***********************************/
 
@@ -571,26 +571,30 @@ static void file_browser_on_rename_textarea_clicked(lv_event_t *e);
 
 /**************************************************************************************************/
 
-void init_sdspi(void)
+esp_err_t init_sdspi(void)
 {
-    if (!s_spi_bus_ready) {
+    const char* TAG_INIT_SDSPI = "init_sdspi";
+    esp_err_t init_sdspi_err = ESP_OK;
+
+    if (!sd_spi_bus_ready) {
+        ESP_LOGI(TAG_INIT_SDSPI, "Initializing SPI bus");
         spi_bus_config_t spi_bus_config = {
             .mosi_io_num = CONFIG_SDSPI_BUS_MOSI_PIN,
             .miso_io_num = CONFIG_SDSPI_BUS_MISO_PIN,
             .sclk_io_num = CONFIG_SPSPI_BUS_SCL_PIN,
             .max_transfer_sz = 4096,
         };
-        esp_err_t bus_err = spi_bus_initialize(CONFIG_SDSPI_BUS_HOST, &spi_bus_config, SPI_DMA_CH_AUTO);
-        if (bus_err != ESP_OK && bus_err != ESP_ERR_INVALID_STATE) {
-            ESP_LOGE(TAG, "Failed to init SDSPI bus: %s", esp_err_to_name(bus_err));
-            ESP_ERROR_CHECK(bus_err);
+        init_sdspi_err = spi_bus_initialize(CONFIG_SDSPI_BUS_HOST, &spi_bus_config, SPI_DMA_CH_AUTO);
+        if (init_sdspi_err != ESP_OK){
+            ESP_LOGE(TAG_INIT_SDSPI, "Failed to init SDSPI bus: (%s)", esp_err_to_name(init_sdspi_err));
+            return init_sdspi_err;
         }
-        s_spi_bus_ready = true;
+        sd_spi_bus_ready = true;
     }
 
-    if (s_sd_card) {
-        ESP_LOGI(TAG, "SDSPI already mounted at %s", CONFIG_SDSPI_MOUNT_POINT);
-        return;
+    if (sd_card_handle) {
+        ESP_LOGI(TAG_INIT_SDSPI, "SDSPI already mounted at %s", CONFIG_SDSPI_MOUNT_POINT);
+        return ESP_OK;
     }
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
@@ -607,29 +611,30 @@ void init_sdspi(void)
         .allocation_unit_size = 16 * 1024,
     };
 
-    ESP_LOGI(TAG, "Mounting SDSPI filesystem at %s", CONFIG_SDSPI_MOUNT_POINT);
-    esp_err_t ret = esp_vfs_fat_sdspi_mount(CONFIG_SDSPI_MOUNT_POINT, &host, &slot_config, &mount_config, &s_sd_card);
-    if (ret != ESP_OK) {
-        if (ret == ESP_FAIL) {
-            ESP_LOGE(TAG, "Failed to mount filesystem");
-        } else {
-            ESP_LOGE(TAG, "Failed to init SD card (%s). Check wiring/pull-ups.", esp_err_to_name(ret));
-        }
-        ESP_ERROR_CHECK(ret);
+    ESP_LOGI(TAG_INIT_SDSPI, "Mounting SDSPI filesystem at %s", CONFIG_SDSPI_MOUNT_POINT);
+    init_sdspi_err = esp_vfs_fat_sdspi_mount(CONFIG_SDSPI_MOUNT_POINT, &host, &slot_config, &mount_config, &sd_card_handle);
+    if (init_sdspi_err != ESP_OK) {
+        ESP_LOGE(TAG_INIT_SDSPI, "Failed to init SD card: (%s). Check wiring/pull-ups.", esp_err_to_name(init_sdspi_err));
+        return init_sdspi_err;
     }
 
-    sdmmc_card_print_info(stdout, s_sd_card);
-    ESP_LOGI(TAG, "SDSPI ready");
+    sdmmc_card_print_info(stdout, sd_card_handle);
+    ESP_LOGI(TAG_INIT_SDSPI, "SDSPI ready");
+    
+    return ESP_OK;
 }
 
 esp_err_t file_browser_start(void)
 {
+    const char* TAG_FILE_BROWSER_START = "File browser start";
+
     file_browser_config_t browser_cfg = {
         .root_path = CONFIG_SDSPI_MOUNT_POINT,
         .max_entries = 512,
     };
 
     if (!browser_cfg.root_path) {
+        ESP_LOGE(TAG_FILE_BROWSER_START, "Failed to find a root path: (%s)", esp_err_to_name(ESP_ERR_INVALID_ARG));
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -644,6 +649,7 @@ esp_err_t file_browser_start(void)
 
     esp_err_t nav_err = fs_nav_init(&ctx->nav, &nav_cfg);
     if (nav_err != ESP_OK) {
+        ESP_LOGE(TAG_FILE_BROWSER_START, "Failed to initialize the fyle system navigator: (%s)", esp_err_to_name(nav_err));
         file_browser_show_error_screen(browser_cfg.root_path, nav_err);
         return nav_err;
     }
@@ -652,6 +658,7 @@ esp_err_t file_browser_start(void)
     if (!bsp_display_lock(0)) {
         fs_nav_deinit(&ctx->nav);
         ctx->initialized = false;
+        ESP_LOGE(TAG_FILE_BROWSER_START, "LVGL display lock cannot be acquired: (%s)", esp_err_to_name(ESP_ERR_TIMEOUT));
         return ESP_ERR_TIMEOUT;
     }
 

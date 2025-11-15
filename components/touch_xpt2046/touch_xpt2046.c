@@ -10,6 +10,7 @@
 #include "esp_lcd_touch_xpt2046.h"
 #include "calibration_xpt2046.h"
 
+const char* TAG_TOUCH = "touch_driver";
 static esp_lcd_touch_handle_t touch_handle = NULL;
 static lv_indev_t *touch_indev = NULL;
 
@@ -36,15 +37,11 @@ static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data);
 
 esp_err_t init_touch(void)
 {
-    static bool s_inited = false;
-    if (s_inited)
-        return ESP_OK;
+    esp_err_t touch_init_err = ESP_OK;
 
-    esp_err_t err;
-
-    /* ----- Initialize the SPI bus for touch ----- */
-    static bool spi_bus_inited = true; // The touch driver shares the SPI bus with ILI9341
-    if (!spi_bus_inited){
+    ESP_LOGI(TAG_TOUCH, "Initializing SPI bus");
+    bool shared_bus = (CONFIG_TOUCH_SPI_HOST == BSP_LCD_SPI_NUM || CONFIG_TOUCH_SPI_HOST == CONFIG_SDSPI_BUS_HOST);
+    if (!shared_bus){
         spi_bus_config_t buscfg = {
             .sclk_io_num = CONFIG_TOUCH_SPI_SCLK_GPIO,
             .mosi_io_num = CONFIG_TOUCH_SPI_MOSI_GPIO,
@@ -54,12 +51,16 @@ esp_err_t init_touch(void)
             .max_transfer_sz = 0,
             .flags = SPICOMMON_BUSFLAG_MASTER,
         };
-        err = spi_bus_initialize(CONFIG_TOUCH_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO);
-        if (err != ESP_OK)
-            return err;
+        touch_init_err = spi_bus_initialize(CONFIG_TOUCH_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO);
+        if (touch_init_err != ESP_OK && touch_init_err != ESP_ERR_INVALID_STATE){
+            ESP_LOGE(TAG_TOUCH, "Failed to initialize SPI bus: (%s)", esp_err_to_name(touch_init_err));
+            return touch_init_err;
+        }
+    }else{
+        ESP_LOGI(TAG_TOUCH, "SPI bus already initialized by another driver");
     }
 
-    /* ----- Create "panel io" IO for touch (uses esp_lcd API) ----- */
+    ESP_LOGI(TAG_TOUCH, "Create IO panel (uses esp_lcd API)");
     esp_lcd_panel_io_spi_config_t tp_io_cfg = {
         .cs_gpio_num = CONFIG_TOUCH_CS_GPIO,
         .dc_gpio_num = -1,
@@ -71,14 +72,17 @@ esp_err_t init_touch(void)
         .flags = {.lsb_first = 0, .cs_high_active = 0},
     };
     esp_lcd_panel_io_handle_t tp_io = NULL;
-    err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)CONFIG_TOUCH_SPI_HOST, &tp_io_cfg, &tp_io);
-    if (err != ESP_OK)
+    touch_init_err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)CONFIG_TOUCH_SPI_HOST, &tp_io_cfg, &tp_io);
+    if (touch_init_err != ESP_OK)
     {
-        spi_bus_free(CONFIG_TOUCH_SPI_HOST);
-        return err;
+        if (!shared_bus){
+            spi_bus_free(CONFIG_TOUCH_SPI_HOST);
+        }
+        ESP_LOGE(TAG_TOUCH, "Failed to create panel: (%s)", esp_err_to_name(touch_init_err));
+        return touch_init_err;
     }
 
-    /* ----- Configure driver XPT2046 ----- */
+    ESP_LOGI(TAG_TOUCH, "Configure driver XPT2046");
     esp_lcd_touch_config_t tp_cfg = {
         .x_max = TOUCH_X_MAX,
         .y_max = TOUCH_Y_MAX,
@@ -94,31 +98,34 @@ esp_err_t init_touch(void)
             .mirror_y = CONFIG_TOUCH_MIRROR_Y ? 1 : 0,
         },
     };
-    err = esp_lcd_touch_new_spi_xpt2046(tp_io, &tp_cfg, &touch_handle);
-    if (err != ESP_OK)
+    touch_init_err = esp_lcd_touch_new_spi_xpt2046(tp_io, &tp_cfg, &touch_handle);
+    if (touch_init_err != ESP_OK)
     {
+        if (!shared_bus){
+            spi_bus_free(CONFIG_TOUCH_SPI_HOST);
+        }
         esp_lcd_panel_io_del(tp_io);
-        spi_bus_free(CONFIG_TOUCH_SPI_HOST);
-        return err;
+        ESP_LOGE(TAG_TOUCH, "Failed to configure driver XPT2046: (%s)", esp_err_to_name(touch_init_err));
+        return touch_init_err;
     }
 
-    s_inited = true;
     return ESP_OK;
 }
 
-bool register_touch_to_lvgl(void)
+esp_err_t register_touch_to_lvgl(void)
 {
     bsp_display_lock(0);
     touch_indev = register_touch_with_lvgl();
     if (touch_indev == NULL)
     {
         bsp_display_unlock();
-        return false;
+        ESP_LOGE("Touch Driver Registration", "XPT2046 FAILED");
+        return ESP_FAIL;
     }
     bsp_display_unlock();
     ESP_LOGI("Touch Driver Registration", "XPT2046 touch registered to LVGL");
 
-    return true;
+    return ESP_OK;
 }
 
 lv_indev_t *touch_get_indev(void)

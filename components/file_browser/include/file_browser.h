@@ -20,9 +20,9 @@ typedef struct {
  * @c CONFIG_SDSPI_MOUNT_POINT using @c esp_vfs_fat_sdspi_mount. Safe to call multiple times.
  *
  * @note Calls ESP_ERROR_CHECK on unrecoverable errors.
- * @post On success, @c s_sd_card is non-NULL and VFS is mounted.
+ * @post On success, @c sd_card_handle is non-NULL and VFS is mounted.
  */
-void init_sdspi(void);
+esp_err_t init_sdspi(void);
 
 /**
  * @brief Create the LVGL file-browser screen using the default SDSPI root.
