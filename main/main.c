@@ -65,17 +65,17 @@ static void my_task_function(void *arg)
     UBaseType_t freeStack[20];
     freeStack[0] = uxTaskGetStackHighWaterMark(NULL);
 
-    /* ----- Init NVS ----- */
-    ESP_ERROR_CHECK(init_nvs());
-    freeStack[1] = uxTaskGetStackHighWaterMark(NULL);
-
-    /* ----- Init SDSPI ----- */
-    ESP_ERROR_CHECK(init_sdspi());
-    freeStack[2] = uxTaskGetStackHighWaterMark(NULL);
-
     /* ----- Init Display and LVGL ----- */
     ESP_ERROR_CHECK(bsp_display_start_result()); 
     ESP_ERROR_CHECK(bsp_display_backlight_on()); 
+    freeStack[1] = uxTaskGetStackHighWaterMark(NULL);
+
+    /* ----- Init NVS ----- */
+    ESP_ERROR_CHECK(init_nvs());
+    freeStack[2] = uxTaskGetStackHighWaterMark(NULL);
+
+    /* ----- Init SDSPI ----- */
+    ESP_ERROR_CHECK(init_sdspi());
     freeStack[3] = uxTaskGetStackHighWaterMark(NULL);
 
     /* ----- Init XPT2046 Touch Driver ----- */
