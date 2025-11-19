@@ -103,6 +103,16 @@ esp_err_t init_sdspi(void)
 {
     const char *TAG_INIT_SDSPI = "init_sdspi";
 
+    if (sd_card_handle){
+        esp_vfs_fat_sdcard_unmount(CONFIG_SDSPI_MOUNT_POINT, sd_card_handle);
+        sd_card_handle = NULL;
+    }
+
+    if (sd_spi_bus_ready){
+        spi_bus_free(CONFIG_SDSPI_BUS_HOST);
+        sd_spi_bus_ready = false;
+    }
+
     if (!sd_spi_bus_ready) {
         ESP_LOGI(TAG_INIT_SDSPI, "Initializing SPI bus");
         spi_bus_config_t spi_bus_config = {
@@ -117,11 +127,6 @@ esp_err_t init_sdspi(void)
             return err;
         }
         sd_spi_bus_ready = true;
-    }
-
-    if (sd_card_handle) {
-        ESP_LOGI(TAG_INIT_SDSPI, "SDSPI already mounted at %s", CONFIG_SDSPI_MOUNT_POINT);
-        return ESP_OK;
     }
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
@@ -173,14 +178,15 @@ void retry_init_sdspi(void)
             sdspi_retry_ui_set_message(&retry_ui, "SD card recovered");
             sdspi_retry_ui_set_progress(&retry_ui, total_wait_ms);
             ESP_LOGW(TAG, "SD card recovered after %d attempt(s)", attempt);
-            vTaskDelay(pdMS_TO_TICKS(1000));
+            vTaskDelay(pdMS_TO_TICKS(1500));
             sdspi_retry_ui_destroy(&retry_ui);
             return;
         }
     }
 
-    sdspi_retry_ui_set_message(&retry_ui, "SD card retry failed");
+    sdspi_retry_ui_set_message(&retry_ui, "SD card retry failed, restarting...");
     sdspi_retry_ui_set_progress(&retry_ui, total_wait_ms);
+    vTaskDelay(pdMS_TO_TICKS(1500));
     sdspi_retry_ui_destroy(&retry_ui);
 
     ESP_LOGE(TAG, "SD card init failed after %d retries. Last ESP err: %s",
