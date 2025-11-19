@@ -8,6 +8,7 @@
 #include "calibration_xpt2046.h"
 #include "touch_xpt2046.h"
 #include "file_browser.h"
+#include "sd_card.h"
 
 static char *TAG = "app_main";
 
@@ -66,36 +67,47 @@ static void my_task_function(void *arg)
     freeStack[0] = uxTaskGetStackHighWaterMark(NULL);
 
     /* ----- Init Display and LVGL ----- */
+    ESP_LOGI(TAG, "Starting bsp for ILI9341 display");
     ESP_ERROR_CHECK(bsp_display_start_result()); 
     ESP_ERROR_CHECK(bsp_display_backlight_on()); 
     freeStack[1] = uxTaskGetStackHighWaterMark(NULL);
 
     /* ----- Init NVS ----- */
+    ESP_LOGI(TAG, "Initializing NVS");
     ESP_ERROR_CHECK(init_nvs());
     freeStack[2] = uxTaskGetStackHighWaterMark(NULL);
 
-    /* ----- Init SDSPI ----- */
-    ESP_ERROR_CHECK(init_sdspi());
+    /* ----- Init XPT2046 Touch Driver ----- */
+    ESP_LOGI(TAG, "Initializing XPT2046 touch driver");
+    ESP_ERROR_CHECK(init_touch()); 
     freeStack[3] = uxTaskGetStackHighWaterMark(NULL);
 
-    /* ----- Init XPT2046 Touch Driver ----- */
-    ESP_ERROR_CHECK(init_touch()); 
-    freeStack[4] = uxTaskGetStackHighWaterMark(NULL);
-
     /* ----- Register Touch Driver To LVGL ----- */
+    ESP_LOGI(TAG, "Registering touch driver to LVGL");
     ESP_ERROR_CHECK(register_touch_to_lvgl());
-    freeStack[5] = uxTaskGetStackHighWaterMark(NULL);
+    freeStack[4] = uxTaskGetStackHighWaterMark(NULL);
 
     /* ----- Load XPT2046 Touch Driver Calibration ----- */
     bool calibration_found;
+    ESP_LOGI(TAG, "Check for touch driver calibration data");
     load_nvs_calibration(&calibration_found);
-    freeStack[6] = uxTaskGetStackHighWaterMark(NULL);
+    freeStack[5] = uxTaskGetStackHighWaterMark(NULL);
 
     /* ----- Calibration Test ----- */
+    ESP_LOGI(TAG, "Start calibration dialog");
     ESP_ERROR_CHECK(calibration_test(calibration_found));
+    freeStack[6] = uxTaskGetStackHighWaterMark(NULL);
+
+    /* ----- Init SDSPI ----- */
+    ESP_LOGI(TAG, "Initializing SDSPI");
+    sdspi_result_t sdspi_result = init_sdspi();
+    if (sdspi_result.sdspi_failcode != SDSPI_SUCCESS){
+        sdspi_fallback(sdspi_result);
+    }
     freeStack[7] = uxTaskGetStackHighWaterMark(NULL);
 
     /* ----- Launch File Browser ----- */
+    ESP_LOGI(TAG, "Start file browser UI");
     esp_err_t fb_err = file_browser_start();
     if (fb_err != ESP_OK) {
         ESP_LOGE(TAG, "File browser failed to start: %s", esp_err_to_name(fb_err));
