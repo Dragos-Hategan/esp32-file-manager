@@ -123,17 +123,6 @@ static file_browser_ctx_t s_browser;
  static void file_browser_format_size(size_t bytes, char *out, size_t out_len);
 
 /**
- * @brief Show a minimal error screen when the storage root is not available.
- *
- * Used when @c fs_nav_init fails. Shows path and error name.
- *
- * @param root_path Root path attempted.
- * @param err       Error that occurred.
- * @note Acquires the display lock internally (non-blocking timeout = 0).
- */
- static void file_browser_show_error_screen(const char *root_path, esp_err_t err);
-
-/**
  * @brief Refresh the current directory view and redraw the list.
  *
  * Re-reads directory entries via @c fs_nav_refresh and repopulates the LVGL list.
@@ -590,7 +579,7 @@ esp_err_t file_browser_start(void)
     esp_err_t nav_err = fs_nav_init(&ctx->nav, &nav_cfg);
     if (nav_err != ESP_OK) {
         ESP_LOGE(TAG_FILE_BROWSER_START, "Failed to initialize the file system navigator: (%s)", esp_err_to_name(nav_err));
-        file_browser_show_error_screen(browser_cfg.root_path, nav_err);
+        retry_init_sdspi();
         return nav_err;
     }
     ctx->initialized = true;
@@ -760,32 +749,6 @@ static void file_browser_format_size(size_t bytes, char *out, size_t out_len)
     } else {
         snprintf(out, out_len, "%.1f %s", value, suffixes[idx]);
     }
-}
-
-static void file_browser_show_error_screen(const char *root_path, esp_err_t err)
-{
-    if (!bsp_display_lock(0)) {
-        return;
-    }
-
-    lv_obj_t *scr = lv_obj_create(NULL);
-    //lv_obj_set_style_bg_color(scr, lv_color_hex(0x120a0a), 0);
-    lv_obj_center(scr);
-
-    lv_obj_t *label = lv_label_create(scr);
-    lv_label_set_text_fmt(label,
-                          "Storage not ready\nPath: %s\n(%s)",
-                          root_path,
-                          esp_err_to_name(err));
-
-    lv_obj_center(label);
-
-    lv_obj_t *label2 = lv_label_create(scr);
-    lv_label_set_text_fmt(label2, "TO DO: FALLBACK");
-    lv_obj_align_to(label2, label, LV_ALIGN_OUT_BOTTOM_MID, 0, 10);
-
-    lv_screen_load(scr);
-    bsp_display_unlock();
 }
 
 static esp_err_t file_browser_reload(void)
