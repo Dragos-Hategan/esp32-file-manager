@@ -571,10 +571,14 @@ static void file_browser_on_rename_textarea_clicked(lv_event_t *e);
 
 /**************************************************************************************************/
 
-esp_err_t init_sdspi(void)
+sdspi_result_t init_sdspi(void)
 {
     const char* TAG_INIT_SDSPI = "init_sdspi";
-    esp_err_t init_sdspi_err = ESP_OK;
+
+    sdspi_result_t sdspi_result = {
+        .sdspi_failcode = SDSPI_SUCCESS,
+        .esp_err = ESP_OK
+    };
 
     if (!sd_spi_bus_ready) {
         ESP_LOGI(TAG_INIT_SDSPI, "Initializing SPI bus");
@@ -584,44 +588,49 @@ esp_err_t init_sdspi(void)
             .sclk_io_num = CONFIG_SPSPI_BUS_SCL_PIN,
             .max_transfer_sz = 4096,
         };
-        init_sdspi_err = spi_bus_initialize(CONFIG_SDSPI_BUS_HOST, &spi_bus_config, SPI_DMA_CH_AUTO);
-        if (init_sdspi_err != ESP_OK){
-            ESP_LOGE(TAG_INIT_SDSPI, "Failed to init SDSPI bus: (%s)", esp_err_to_name(init_sdspi_err));
-            return init_sdspi_err;
+        esp_err_t err = spi_bus_initialize(CONFIG_SDSPI_BUS_HOST, &spi_bus_config, SPI_DMA_CH_AUTO);
+        if (err != ESP_OK){
+            ESP_LOGE(TAG_INIT_SDSPI, "Failed to init SDSPI bus: (%s)", esp_err_to_name(err));
+            sdspi_result.sdspi_failcode = SDSPI_SPI_BUS_FAILED;
+            sdspi_result.esp_err = err;
+            return sdspi_result;
         }
         sd_spi_bus_ready = true;
     }
 
     if (sd_card_handle) {
         ESP_LOGI(TAG_INIT_SDSPI, "SDSPI already mounted at %s", CONFIG_SDSPI_MOUNT_POINT);
-        return ESP_OK;
+        return sdspi_result;
     }
 
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.slot = CONFIG_SDSPI_BUS_HOST;
     host.max_freq_khz = CONFIG_SDSPI_MAX_FREQ_KHZ;
+    host.slot = CONFIG_SDSPI_BUS_HOST;
 
     sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
-    slot_config.host_id = CONFIG_SDSPI_BUS_HOST;
     slot_config.gpio_cs = CONFIG_SDSPI_DEVICE_CS_PIN;
+    slot_config.host_id = CONFIG_SDSPI_BUS_HOST;
 
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+        .allocation_unit_size = 16 * 1024,
         .format_if_mount_failed = false,
         .max_files = 5,
-        .allocation_unit_size = 16 * 1024,
     };
 
     ESP_LOGI(TAG_INIT_SDSPI, "Mounting SDSPI filesystem at %s", CONFIG_SDSPI_MOUNT_POINT);
-    init_sdspi_err = esp_vfs_fat_sdspi_mount(CONFIG_SDSPI_MOUNT_POINT, &host, &slot_config, &mount_config, &sd_card_handle);
-    if (init_sdspi_err != ESP_OK) {
-        ESP_LOGE(TAG_INIT_SDSPI, "Failed to init SD card: (%s). Check wiring/pull-ups.", esp_err_to_name(init_sdspi_err));
-        return init_sdspi_err;
+    esp_err_t err = esp_vfs_fat_sdspi_mount(CONFIG_SDSPI_MOUNT_POINT, &host, &slot_config, &mount_config, &sd_card_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG_INIT_SDSPI, "Failed to init SD card: (%s). Check wiring/pull-ups.", esp_err_to_name(err));
+        sdspi_result.sdspi_failcode = SDSPI_FAT_MOUNT_FAILED;
+        sdspi_result.esp_err = err;
+        sd_card_handle = NULL;
+        return sdspi_result;
     }
 
     sdmmc_card_print_info(stdout, sd_card_handle);
     ESP_LOGI(TAG_INIT_SDSPI, "SDSPI ready");
     
-    return ESP_OK;
+    return sdspi_result;
 }
 
 esp_err_t file_browser_start(void)

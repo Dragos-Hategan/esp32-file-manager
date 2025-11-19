@@ -228,7 +228,7 @@ void load_nvs_calibration(bool *calibration_found)
 {
     const touch_cal_t *existing_cal = &s_cal;
     *calibration_found = touch_cal_load_nvs(existing_cal);
-    ESP_LOGI("Touch Calibration", "%s", *calibration_found ? "Touch driver is already calibrated" : "Touch driver is already needs calibration");
+    ESP_LOGI("touch_calibration", "%s", *calibration_found ? "Touch driver is already calibrated" : "Touch driver needs calibration");
 }
 
 esp_err_t calibration_test(bool calibration_found)

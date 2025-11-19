@@ -119,11 +119,11 @@ esp_err_t register_touch_to_lvgl(void)
     if (touch_indev == NULL)
     {
         bsp_display_unlock();
-        ESP_LOGE("Touch Driver Registration", "XPT2046 FAILED");
+        ESP_LOGE("touch_driver_registration", "XPT2046 FAILED");
         return ESP_FAIL;
     }
     bsp_display_unlock();
-    ESP_LOGI("Touch Driver Registration", "XPT2046 touch registered to LVGL");
+    ESP_LOGI("touch_driver_registration", "XPT2046 touch registered to LVGL");
 
     return ESP_OK;
 }
