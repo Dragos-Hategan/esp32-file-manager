@@ -4,52 +4,39 @@
 extern "C" {
 #endif
 
+#include <stdbool.h>
 #include "esp_err.h"
-
-typedef enum{
-    SDSPI_SUCCESS,
-    SDSPI_SPI_BUS_FAILED,
-    SDSPI_FAT_MOUNT_FAILED,
-    SDSPI_COMMUNICATION_FAILED
-} sdspi_failcodes_t;
-
-typedef struct{
-    sdspi_failcodes_t sdspi_failcode;
-    esp_err_t esp_err;
-} sdspi_result_t ;
 
 /**
  * @brief Initializes the SDSPI bus and mounts the SD card filesystem.
  *
- * Performs one-time initialization of the SPI bus configured by
- * @c CONFIG_SDSPI_BUS_HOST, then attempts to mount the FAT filesystem at
- * @c CONFIG_SDSPI_MOUNT_POINT via @c esp_vfs_fat_sdspi_mount.
+ * Performs a one-time initialization of the SPI bus specified by
+ * @c CONFIG_SDSPI_BUS_HOST, followed by mounting the FAT filesystem at
+ * @c CONFIG_SDSPI_MOUNT_POINT using @c esp_vfs_fat_sdspi_mount.
  *
- * The function is safe to call multiple times. If the SPI bus was already
- * initialized or the card is already mounted, the call returns a success
- * result without modifying the existing state.
+ * The function is safe to call multiple times. If the SPI bus is already
+ * initialized or the SD card is already mounted, the function returns
+ * @c ESP_OK without reinitializing or remounting resources.
  *
- * @return sdspi_result_t
- *         A structured result containing:
- *         - a high-level SDSPI fail code (see @ref sdspi_failcode_t), and
- *         - the underlying @c esp_err_t value returned by the ESP-IDF API.
+ * @return esp_err_t  
+ *         - @c ESP_OK on success (bus initialized and/or filesystem mounted)  
+ *         - ESP-IDF error code if SPI bus initialization or FAT mount fails  
  *
- * @note No fatal aborts are used; all errors are reported through the returned
- *       @c sdspi_result_t structure.
+ * @note No fatal aborts are used; all failures are reported via the returned
+ *       @c esp_err_t value.
  *
- * @post On success, the VFS mount point is ready.
+ * @post On success, the VFS mount point is available and @c sd_card_handle
+ *       points to a valid @c sdmmc_card_t structure.
  */
-sdspi_result_t init_sdspi(void);
+esp_err_t init_sdspi(void);
 
 /**
- * @brief Centralized error handler invoked when @ref init_sdspi fails.
+ * @brief Prompt the user then retry SD card initialization with UI feedback.
  *
- * Currently retries on any recoverable SDSPI failcode; future cases can add
- * more granular behavior.
- *
- * @param res Structured error returned by @ref init_sdspi.
+ * @return true  if the bus/card recovered inside @ref SDSPI_MAX_RETRIES.
+ * @return false once all retries are exhausted.
  */
-void sdspi_fallback(sdspi_result_t res);
+bool retry_init_sdspi(void);
 
 #ifdef __cplusplus
 }

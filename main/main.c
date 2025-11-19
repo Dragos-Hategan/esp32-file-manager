@@ -100,9 +100,9 @@ static void my_task_function(void *arg)
 
     /* ----- Init SDSPI ----- */
     ESP_LOGI(TAG, "Initializing SDSPI");
-    sdspi_result_t sdspi_result = init_sdspi();
-    if (sdspi_result.sdspi_failcode != SDSPI_SUCCESS){
-        sdspi_fallback(sdspi_result);
+    esp_err_t err = init_sdspi();
+    if (err != ESP_OK){
+        retry_init_sdspi();
     }
     freeStack[7] = uxTaskGetStackHighWaterMark(NULL);
 
