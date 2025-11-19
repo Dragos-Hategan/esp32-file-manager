@@ -151,7 +151,7 @@ esp_err_t init_sdspi(void)
     return ESP_OK;
 }
 
-bool retry_init_sdspi(void)
+void retry_init_sdspi(void)
 {
     sdspi_retry_wait_for_confirmation();
 
@@ -172,9 +172,10 @@ bool retry_init_sdspi(void)
         if (err == ESP_OK) {
             sdspi_retry_ui_set_message(&retry_ui, "SD card recovered");
             sdspi_retry_ui_set_progress(&retry_ui, total_wait_ms);
-            sdspi_retry_ui_destroy(&retry_ui);
             ESP_LOGW(TAG, "SD card recovered after %d attempt(s)", attempt);
-            return true;
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            sdspi_retry_ui_destroy(&retry_ui);
+            return;
         }
     }
 
@@ -186,7 +187,7 @@ bool retry_init_sdspi(void)
              SDSPI_MAX_RETRIES,
              esp_err_to_name(err));
 
-    return false;
+    esp_restart();
 }
 
 static void sdspi_retry_prompt_event_cb(lv_event_t *e)

@@ -579,7 +579,6 @@ esp_err_t file_browser_start(void)
     esp_err_t nav_err = fs_nav_init(&ctx->nav, &nav_cfg);
     if (nav_err != ESP_OK) {
         ESP_LOGE(TAG_FILE_BROWSER_START, "Failed to initialize the file system navigator: (%s)", esp_err_to_name(nav_err));
-        retry_init_sdspi();
         return nav_err;
     }
     ctx->initialized = true;
@@ -800,6 +799,7 @@ static void file_browser_on_entry_click(lv_event_t *e)
             file_browser_sync_view(ctx);
         } else {
             ESP_LOGE(TAG, "Failed to enter \"%s\": %s", entry->name, esp_err_to_name(err));
+            retry_init_sdspi();
         }
         return;
     }
@@ -815,6 +815,7 @@ static void file_browser_on_entry_click(lv_event_t *e)
             esp_err_t err = text_viewer_open(&opts);
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to view \"%s\": %s", entry->name, esp_err_to_name(err));
+                retry_init_sdspi();
             }
         } else {
             ESP_LOGE(TAG, "Path too long for \"%s\"", entry->name);
@@ -860,6 +861,7 @@ static void file_browser_on_parent_click(lv_event_t *e)
         file_browser_sync_view(ctx);
     } else {
         ESP_LOGE(TAG, "Failed to go parent: %s", esp_err_to_name(err));
+        retry_init_sdspi();
     }
 }
 
@@ -916,6 +918,7 @@ static void file_browser_on_new_txt_click(lv_event_t *e)
     esp_err_t err = text_viewer_open(&opts);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start new file editor: %s", esp_err_to_name(err));
+        retry_init_sdspi();
     }
 }
 
@@ -929,6 +932,7 @@ static void file_browser_editor_closed(bool changed, void *user_ctx)
     esp_err_t err = file_browser_reload();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to reload after editor: %s", esp_err_to_name(err));
+        retry_init_sdspi();
     }
 }
 
@@ -1066,6 +1070,7 @@ static void file_browser_on_folder_create(lv_event_t *e)
     esp_err_t reload = file_browser_reload();
     if (reload != ESP_OK) {
         ESP_LOGE(TAG, "Failed to refresh after folder create: %s", esp_err_to_name(reload));
+        retry_init_sdspi();
     }
 }
 
@@ -1362,6 +1367,7 @@ static void file_browser_on_action_button(lv_event_t *e)
             esp_err_t err = text_viewer_open(&opts);
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to edit \"%s\": %s", ctx->action_entry.name, esp_err_to_name(err));
+                retry_init_sdspi();
             } else {
                 file_browser_clear_action_state(ctx);
             }
@@ -1432,6 +1438,7 @@ static void file_browser_on_delete_confirm(lv_event_t *e)
     esp_err_t err = file_browser_delete_selected_entry(ctx);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Delete failed: %s", esp_err_to_name(err));
+        retry_init_sdspi();
     }
 }
 
@@ -1641,6 +1648,7 @@ static void file_browser_on_rename_accept(lv_event_t *e)
     esp_err_t reload = file_browser_reload();
     if (reload != ESP_OK) {
         ESP_LOGE(TAG, "Failed to refresh after rename: %s", esp_err_to_name(reload));
+        retry_init_sdspi();
     }
 }
 

@@ -32,11 +32,8 @@ esp_err_t init_sdspi(void);
 
 /**
  * @brief Prompt the user then retry SD card initialization with UI feedback.
- *
- * @return true  if the bus/card recovered inside @ref SDSPI_MAX_RETRIES.
- * @return false once all retries are exhausted.
  */
-bool retry_init_sdspi(void);
+void retry_init_sdspi(void);
 
 #ifdef __cplusplus
 }
