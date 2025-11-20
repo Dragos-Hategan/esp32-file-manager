@@ -600,7 +600,6 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
     text_viewer_set_original(ctx, text);
     ctx->dirty = false;
     text_viewer_set_status(ctx, "Saved");
-    text_viewer_close(ctx, true);
 }
 
 static void text_viewer_on_save(lv_event_t *e)
