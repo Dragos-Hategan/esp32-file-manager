@@ -53,6 +53,14 @@ static bool fs_nav_is_valid_relative(const char *relative);
 static void fs_nav_update_current_path(fs_nav_t *nav);
 
 /**
+ * @brief Verify that the SD mount (root/current) is still accessible.
+ *
+ * @param nav Navigator descriptor.
+ * @return ESP_OK if both root and current paths are directories; error otherwise.
+ */
+static esp_err_t fs_nav_check_storage_ready(const fs_nav_t *nav);
+
+/**
  * @brief Set @c nav->relative (validated & cleaned) and rebuild @c nav->current.
  *
  * @param[in,out] nav      Navigator.
@@ -187,13 +195,24 @@ esp_err_t fs_nav_refresh(fs_nav_t *nav)
     size_t limit = nav->max_entries ? nav->max_entries : SIZE_MAX;
     size_t count = 0;
     struct dirent *dent = NULL;
-    
+    bool truncated = false;
+    bool scan_failed = false;
+
+    esp_err_t storage_err = fs_nav_check_storage_ready(nav);
+    if (storage_err != ESP_OK) {
+        closedir(dir);
+        nav->entry_count = 0;
+        return storage_err;
+    }
+
+    errno = 0;
     while ((dent = readdir(dir)) != NULL) {
         if (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0) {
             continue;
         }
         if (count >= limit) {
             ESP_LOGW(TAG, "Directory listing truncated at %zu entries", limit);
+            truncated = true;
             break;
         }
 
@@ -237,7 +256,18 @@ esp_err_t fs_nav_refresh(fs_nav_t *nav)
         count++;
     }
 
+    int scan_errno = errno;
+    if (!truncated) {
+        scan_failed = (scan_errno != 0);
+    }
+
     closedir(dir);
+    if (scan_failed) {
+        ESP_LOGE(TAG, "readdir(%s) failed: errno=%d", nav->current, scan_errno);
+        nav->entry_count = 0;
+        return ESP_FAIL;
+    }
+
     nav->entry_count = count;
     fs_nav_sort_entries(nav);
     return ESP_OK;
@@ -277,11 +307,14 @@ esp_err_t fs_nav_enter(fs_nav_t *nav, size_t index)
         return ESP_ERR_INVALID_STATE;
     }
 
+    char prev_relative[FS_NAV_MAX_PATH];
+    strlcpy(prev_relative, nav->relative, sizeof(prev_relative));
+
     char next_relative[FS_NAV_MAX_PATH];
-    if (nav->relative[0] == '\0') {
+    if (prev_relative[0] == '\0') {
         strlcpy(next_relative, entry->name, sizeof(next_relative));
     } else {
-        int written = snprintf(next_relative, sizeof(next_relative), "%s/%s", nav->relative, entry->name);
+        int written = snprintf(next_relative, sizeof(next_relative), "%s/%s", prev_relative, entry->name);
         if (written <= 0 || (size_t)written >= sizeof(next_relative)) {
             return ESP_ERR_INVALID_SIZE;
         }
@@ -295,6 +328,9 @@ esp_err_t fs_nav_enter(fs_nav_t *nav, size_t index)
     err = fs_nav_refresh(nav);
     if (err == ESP_OK) {
         fs_nav_store_state(nav);
+    } else {
+        // best-effort restore previous location if refresh failed
+        fs_nav_set_relative(nav, prev_relative);
     }
     return err;
 }
@@ -305,14 +341,20 @@ esp_err_t fs_nav_go_parent(fs_nav_t *nav)
         return ESP_ERR_INVALID_STATE;
     }
 
-    char *slash = strrchr(nav->relative, '/');
+    char prev_relative[FS_NAV_MAX_PATH];
+    strlcpy(prev_relative, nav->relative, sizeof(prev_relative));
+
+    char new_relative[FS_NAV_MAX_PATH];
+    strlcpy(new_relative, prev_relative, sizeof(new_relative));
+
+    char *slash = strrchr(new_relative, '/');
     if (slash) {
         *slash = '\0';
     } else {
-        nav->relative[0] = '\0';
+        new_relative[0] = '\0';
     }
 
-    esp_err_t err = fs_nav_set_relative(nav, nav->relative);
+    esp_err_t err = fs_nav_set_relative(nav, new_relative);
     if (err != ESP_OK) {
         return err;
     }
@@ -320,6 +362,9 @@ esp_err_t fs_nav_go_parent(fs_nav_t *nav)
     err = fs_nav_refresh(nav);
     if (err == ESP_OK) {
         fs_nav_store_state(nav);
+    } else {
+        // Restore previous relative path so navigation state doesn't drift
+        fs_nav_set_relative(nav, prev_relative);
     }
     return err;
 }
@@ -398,6 +443,26 @@ static void fs_nav_update_current_path(fs_nav_t *nav)
         strlcat(nav->current, "/", sizeof(nav->current));
         strlcat(nav->current, nav->relative, sizeof(nav->current));
     }
+}
+
+static esp_err_t fs_nav_check_storage_ready(const fs_nav_t *nav)
+{
+    if (!nav) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    struct stat st = {0};
+    if (stat(nav->root, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        int err = errno;
+        ESP_LOGE(TAG, "Storage root \"%s\" unavailable (errno=%d)", nav->root, err);
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (stat(nav->current, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        int err = errno;
+        ESP_LOGE(TAG, "Directory \"%s\" unavailable (errno=%d)", nav->current, err);
+        return ESP_ERR_NOT_FOUND;
+    }
+    return ESP_OK;
 }
 
 static esp_err_t fs_nav_set_relative(fs_nav_t *nav, const char *relative)

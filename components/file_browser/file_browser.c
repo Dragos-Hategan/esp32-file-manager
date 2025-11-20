@@ -60,6 +60,7 @@ typedef struct {
     lv_obj_t *rename_keyboard;
     file_browser_action_entry_t action_entry;
     bool suppress_click;
+    bool pending_go_parent;
 } file_browser_ctx_t;
 
 static file_browser_ctx_t s_browser;
@@ -708,7 +709,16 @@ static void file_browser_schedule_wait_for_reconnection(void)
 
 static void file_browser_wait_for_reconnection_task(void* arg)
 {
+    file_browser_ctx_t *ctx = &s_browser;
     if (xSemaphoreTake(reconnection_success, portMAX_DELAY) == pdTRUE){
+        if (ctx->pending_go_parent) {
+            ctx->pending_go_parent = false;
+            esp_err_t nav_err = fs_nav_go_parent(&ctx->nav);
+            if (nav_err != ESP_OK){
+                ESP_LOGE(TAG, "fs_nav_go_parent() failed after reconnection (%s), restarting...", esp_err_to_name(nav_err));
+                esp_restart();
+            }
+        }
         esp_err_t err = file_browser_reload();
         if (err != ESP_OK){
             ESP_LOGE(TAG, "file_browser_reload() failed while trying to refresh the screen after a sd card reconnection, restaring...\n");
@@ -921,10 +931,11 @@ static void file_browser_on_parent_click(lv_event_t *e)
     esp_err_t err = fs_nav_go_parent(&ctx->nav);
     if (err == ESP_OK) {
         file_browser_sync_view(ctx);
-        printf("A mers file_browser!\n");
     } else {
         ESP_LOGE(TAG, "Failed to go parent: %s", esp_err_to_name(err));
+        ctx->pending_go_parent = true;
         sdspi_schedule_sd_retry();
+        file_browser_schedule_wait_for_reconnection();
     }
 }
 
