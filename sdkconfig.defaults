@@ -11,12 +11,12 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_modified.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions_modified.csv"
 
 # === PSRAM ===
-#CONFIG_SPIRAM=y                                   
-#CONFIG_SPIRAM_MODE_QUAD=y                          
-#CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y                
-#CONFIG_SPIRAM_RODATA=y                            
-#CONFIG_SPIRAM_SPEED_80M=y                         
-#CONFIG_SPIRAM_USE_CAPS_ALLOC=y                    
+CONFIG_SPIRAM=y                                   
+CONFIG_SPIRAM_MODE_QUAD=y                          
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y                
+CONFIG_SPIRAM_RODATA=y                            
+CONFIG_SPIRAM_SPEED_80M=y                         
+CONFIG_SPIRAM_USE_CAPS_ALLOC=y                    
 
 # === LVGL – core / OS / libc ===
 CONFIG_LV_USE_CLIB_MALLOC=y                       
