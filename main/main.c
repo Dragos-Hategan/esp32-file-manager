@@ -59,7 +59,7 @@ static esp_err_t init_nvs(void)
     return nvs_err;
 }
 
-static void my_task_function(void *arg)
+static void main_task(void *arg)
 {
     ESP_LOGI(TAG, "\n\n ********** LVGL File Display ********** \n");
 
@@ -125,16 +125,15 @@ static void my_task_function(void *arg)
 
 void app_main(void)
 {
-    xTaskCreatePinnedToCore(my_task_function, "MyTask", 12 * 1024, NULL, 1, NULL, 0);
+    xTaskCreatePinnedToCore(main_task, "MyTask", 8 * 1024, NULL, 1, NULL, 0);
 
     while (1){
-        // size_t free_ram[5];
-        // free_ram[0] = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-        // free_ram[1] = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-        // free_ram[2] = heap_caps_get_free_size(MALLOC_CAP_DMA);
+        size_t free_heap = esp_get_free_heap_size();
+        size_t min_free_heap = esp_get_minimum_free_heap_size();
+        size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
+ 
+        printf("\rfree=%u  min=%u max=%u                 ", free_heap, min_free_heap, largest_block);
 
-        // heap_caps_print_heap_info(0);  // 0 = all caps
-        // printf("\n Free SPIRAM= %u | Free SRAM= %u | Free DMA_RAM= %u\n\n\n\n", free_ram[0], free_ram[1], free_ram[2]);
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
