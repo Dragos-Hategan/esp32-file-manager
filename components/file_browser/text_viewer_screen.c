@@ -141,9 +141,30 @@ static void text_viewer_hide_keyboard(text_viewer_ctx_t *ctx);
  */
 static void text_viewer_on_text_area_clicked(lv_event_t *e);
 /**
- * @brief Warn when scrolling past the ends of the text area.
+ * @brief Immediately jump the text area's scroll to the cursor position.
  *
- * @param e LVGL event.
+ * Skips LVGL's default smooth scroll animation and forces the text area
+ * to scroll instantly to the final cursor location. Useful when loading
+ * a new text chunk and repositioning the cursor manually.
+ *
+ * @param ctx Pointer to the text viewer context. Must not be NULL.
+ */
+static void text_viewer_skip_cursor_animation(text_viewer_ctx_t *ctx);
+
+/**
+ * @brief Handle scroll events and load new text chunks when reaching edges.
+ *
+ * Triggered whenever the LVGL text area scrolls.  
+ * Detects when the user reaches the top or bottom of the current buffer window
+ * and loads the previous/next chunk of the file accordingly.
+ *
+ * Behavior:
+ * - When scrolled to the top, loads the previous file chunk (if available).
+ * - When scrolled to the bottom, loads the next chunk (if available).
+ * - Repositions the cursor after new content is inserted and skips animation.
+ *
+ * @param e LVGL event structure (LV_EVENT_SCROLL).  
+ *          User data must contain a valid `text_viewer_ctx_t *`.
  */
 static void text_viewer_on_text_scrolled(lv_event_t *e);
 
@@ -650,7 +671,6 @@ static void text_viewer_on_text_scrolled(lv_event_t *e)
 
     if (at_top && !ctx->at_top_edge)
     {
-        ESP_LOGW(TAG, "Reached start of text area");
         ctx->at_top_edge = true;
 
         if (!ctx->new_file && ctx->lasf_file_offset_kb > 0)
@@ -680,7 +700,6 @@ static void text_viewer_on_text_scrolled(lv_event_t *e)
 
     if (at_bottom && !ctx->at_bottom_edge)
     {
-        ESP_LOGW(TAG, "Reached end of text area");
         ctx->at_bottom_edge = true;
 
         if (!ctx->new_file && ctx->current_file_offset_kb < ctx->max_file_offset_kb)
