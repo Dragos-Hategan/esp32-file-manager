@@ -83,7 +83,7 @@ esp_err_t fs_text_create(const char *path)
     return ESP_OK;
 }
 
-esp_err_t fs_text_read(const char *path, char **out_buf, size_t *out_len)
+esp_err_t fs_text_read_range(const char *path, size_t offset_kb, char **out_buf, size_t *out_len)
 {
     if (!out_buf || !fs_text_check_path(path)) {
         return ESP_ERR_INVALID_ARG;
@@ -94,10 +94,30 @@ esp_err_t fs_text_read(const char *path, char **out_buf, size_t *out_len)
         ESP_LOGE(TAG, "stat(%s) failed (errno=%d)", path, errno);
         return ESP_FAIL;
     }
-    if ((size_t)st.st_size > FS_TEXT_MAX_BYTES) {
-        ESP_LOGE(TAG, "File %s too large (%ld bytes)", path, st.st_size);
+
+    if (offset_kb > SIZE_MAX / 1024) {
+        return ESP_ERR_INVALID_ARG; 
+    }
+    size_t offset_bytes = offset_kb * 1024u;
+
+    size_t file_size = (size_t)st.st_size;
+    size_t file_size_kb = file_size / 1024;
+    if (offset_bytes >= file_size) {
+        offset_bytes = file_size_kb * 1024;
+    }
+
+    size_t max_available = file_size - offset_bytes;
+    size_t to_read = READ_CHUNK_SIZE_B;
+    if (to_read > max_available) {
+        to_read = max_available; 
+    }
+
+#ifdef FS_TEXT_MAX_BYTES
+    if (to_read > FS_TEXT_MAX_BYTES) {
+        ESP_LOGE(TAG, "Requested range too large (%zu bytes)", to_read);
         return ESP_ERR_INVALID_SIZE;
     }
+#endif
 
     FILE *f = fopen(path, "rb");
     if (!f) {
@@ -105,15 +125,20 @@ esp_err_t fs_text_read(const char *path, char **out_buf, size_t *out_len)
         return ESP_FAIL;
     }
 
-    size_t size = (size_t)st.st_size;
-    char *buf = (char *)malloc(size + 1);
+    if (fseek(f, (long)offset_bytes, SEEK_SET) != 0) {
+        ESP_LOGE(TAG, "fseek(%s, %zu) failed (errno=%d)", path, offset_bytes, errno);
+        fclose(f);
+        return ESP_FAIL;
+    }
+
+    char *buf = (char *)malloc(to_read + 1);
     if (!buf) {
         fclose(f);
         return ESP_ERR_NO_MEM;
     }
 
-    size_t read = fread(buf, 1, size, f);
-    if (read != size && ferror(f)) {
+    size_t read = fread(buf, 1, to_read, f);
+    if (read == 0 && ferror(f)) {
         ESP_LOGE(TAG, "fread(%s) failed (errno=%d)", path, errno);
         free(buf);
         fclose(f);
@@ -126,6 +151,7 @@ esp_err_t fs_text_read(const char *path, char **out_buf, size_t *out_len)
     if (out_len) {
         *out_len = read;
     }
+
     return ESP_OK;
 }
 
