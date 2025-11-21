@@ -38,6 +38,37 @@ bool fs_text_is_txt(const char *name);
  */
 esp_err_t fs_text_create(const char *path);
 
+/**
+ * @brief Read a fixed-size block of text bytes from a file starting at a given offset.
+ *
+ * This function reads a chunk of data (READ_CHUNK_SIZE_B bytes) from a file,
+ * starting at an offset specified in kilobytes. It validates the file path,
+ * ensures the offset does not exceed the file size, adjusts the read length
+ * when near EOF, and allocates a null-terminated buffer for the output.
+ *
+ * The caller takes ownership of the allocated buffer and must free it.
+ *
+ * @param[in]  path        Absolute file path to read from.
+ * @param[in]  offset_kb   Offset in kilobytes from the start of the file.
+ *                         The actual byte offset becomes `offset_kb * 1024`.
+ * @param[out] out_buf     Pointer to a char* that will receive the allocated buffer.
+ *                         Must not be NULL.
+ * @param[out] out_len     Optional pointer to receive the number of bytes actually read.
+ *                         Can be NULL.
+ *
+ * @return
+ *      - ESP_OK                   On success.
+ *      - ESP_ERR_INVALID_ARG      If parameters are invalid or the path fails validation.
+ *      - ESP_ERR_INVALID_SIZE     If the requested read size exceeds FS_TEXT_MAX_BYTES.
+ *      - ESP_ERR_NO_MEM           If memory allocation fails.
+ *      - ESP_FAIL                 If file operations (stat, fopen, fseek, fread) fail.
+ *
+ * @note
+ * - The output buffer is always null-terminated, even when reading binary data.
+ * - If the offset lands beyond EOF, a zero-length read is performed.
+ * - READ_CHUNK_SIZE_B defines the number of bytes to read per call.
+ * - The function only works with regular files.
+ */
 esp_err_t fs_text_read_range(const char *path, size_t offset_kb, char **out_buf, size_t *out_len);
 
 /**
