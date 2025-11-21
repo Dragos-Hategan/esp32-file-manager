@@ -6,19 +6,11 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdio.h>
 
 #include "esp_err.h"
 
 #define FS_TEXT_MAX_BYTES   (32 * 1024)
-#define FS_TEXT_READER_CHUNK_BYTES   (1 * 1024)
 #define FS_TEXT_MAX_PATH    512
-
-typedef struct {
-    FILE *f;            /**< Internal FILE* handle. */
-    size_t file_size;   /**< Total file size in bytes (from stat). */
-    size_t offset;      /**< Bytes already delivered to the caller. */
-} fs_text_reader_t;
 
 /**
  * @brief Check whether a file name/path uses a .txt extension (case-insensitive).
@@ -56,47 +48,6 @@ esp_err_t fs_text_create(const char *path);
  *         exceeds @ref FS_TEXT_MAX_BYTES, ESP_ERR_NO_MEM on allocation failure, ESP_FAIL on I/O error.
  */
 esp_err_t fs_text_read(const char *path, char **out_buf, size_t *out_len);
-
-/**
- * @brief Open a text file for incremental, chunked reading.
- *
- * The reader keeps only a small buffer (e.g., 16 KB) in RAM at any time. Use
- * @ref fs_text_reader_next to pull the next chunk until it returns 0 bytes.
- *
- * @param path   Absolute path to the .txt file.
- * @param reader Reader context to initialize. Must remain valid until closed.
- * @return ESP_OK on success, ESP_ERR_INVALID_ARG on bad params, ESP_FAIL on I/O errors.
- */
-esp_err_t fs_text_reader_open(const char *path, fs_text_reader_t *reader);
-
-/**
- * @brief Read the next chunk from an open text reader.
- *
- * @param reader   Initialized reader from @ref fs_text_reader_open.
- * @param buf      Caller-provided buffer (recommend FS_TEXT_READER_CHUNK_BYTES).
- * @param buf_len  Size of @p buf in bytes; data read will not exceed this.
- * @param out_len  Optional; set to bytes read. 0 means EOF was reached.
- * @return ESP_OK on success or EOF, ESP_ERR_INVALID_ARG on bad params, ESP_FAIL on I/O errors.
- */
-esp_err_t fs_text_reader_next(fs_text_reader_t *reader, char *buf, size_t buf_len, size_t *out_len);
-
-/**
- * @brief Seek to an absolute byte offset within the open reader.
- *
- * @param reader Initialized reader from @ref fs_text_reader_open.
- * @param offset Absolute byte offset from start of file.
- * @return ESP_OK on success, ESP_ERR_INVALID_ARG on bad params, ESP_FAIL on fseek errors.
- */
-esp_err_t fs_text_reader_seek(fs_text_reader_t *reader, size_t offset);
-
-/**
- * @brief Close a text reader and release its FILE handle.
- *
- * Safe to call multiple times; on return the reader is zeroed.
- *
- * @param reader Reader to close (can be NULL).
- */
-void fs_text_reader_close(fs_text_reader_t *reader);
 
 /**
  * @brief Atomically replace (or create) a text file with the provided buffer.
