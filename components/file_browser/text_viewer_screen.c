@@ -4,6 +4,8 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+#include <errno.h>
 
 #include "fs_navigator.h"
 #include "fs_text_ops.h"
@@ -210,11 +212,44 @@ static void text_viewer_on_screen_clicked(lv_event_t *e);
 static void text_viewer_on_text_changed(lv_event_t *e);
 
 /**
- * @brief Save handler: writes current text to file and updates status.
+ * @brief Save the currently loaded text chunk back to the underlying file.
  *
- * Logs and shows an error status if the write fails.
+ * This function writes the contents of the LVGL textarea in @p ctx->text_area
+ * into the backing file at @p ctx->path, only within the byte window
+ * corresponding to the currently loaded chunks (defined by
+ * ctx->lasf_file_offset_kb and ctx->current_file_offset_kb).
  *
- * @param ctx Viewer context.
+ * Save strategy:
+ * - If @p ctx is NULL, the function returns immediately.
+ * - If this is a new file with no name yet, a name dialog is shown and
+ *   the function returns without writing.
+ * - If the file name is still missing, a "Missing file name" status is set.
+ * - Computes a byte window [window_start, window_end) for the loaded text
+ *   (based on chunk offsets and READ_CHUNK_SIZE_B), with overflow checks.
+ * - Clamps the window to the existing file size to avoid seeking past EOF.
+ * - Builds a temporary file path in the same directory as @p dest_path.
+ * - Opens the existing file (if any) as @p src and a temporary file as @p tmp.
+ * - Writes:
+ *      1) Prefix (bytes [0, window_start)) from @p src into @p tmp.
+ *      2) The current textarea contents into @p tmp.
+ *      3) Suffix (bytes [window_end, file_end)) from @p src into @p tmp.
+ * - Renames the temporary file over the destination file for an atomic-ish
+ *   replacement.
+ *
+ * Error handling:
+ * - On I/O errors (open/read/write/seek/rename) it:
+ *      - Sets a human-readable status string via text_viewer_set_status().
+ *      - Logs an error via ESP_LOGE().
+ *      - Calls sdspi_schedule_sd_retry() to trigger SD-card recovery logic.
+ *      - Cleans up open FILE handles and removes the temporary file.
+ *
+ * On success:
+ * - Updates the "original" text snapshot via text_viewer_set_original().
+ * - Clears @p ctx->dirty (sets it to false).
+ * - Sets status to "Saved".
+ *
+ * @param ctx Pointer to the text viewer context. May be NULL, in which case
+ *            the function returns immediately without side effects.
  */
 static void text_viewer_handle_save(text_viewer_ctx_t *ctx);
 
@@ -865,18 +900,210 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
     }
 
     const char *dest_path = ctx->path;
-    esp_err_t err = fs_text_write(dest_path, text, strlen(text));
-    if (err != ESP_OK)
+    size_t first_kb = ctx->lasf_file_offset_kb;
+    size_t second_kb = ctx->current_file_offset_kb;
+    size_t chunk_count = (second_kb > first_kb) ? (second_kb - first_kb + 1u) : 1u;
+
+    /* Compute byte window for the currently loaded textarea (two chunks) */
+    if (first_kb > SIZE_MAX / 1024u || chunk_count > SIZE_MAX / READ_CHUNK_SIZE_B)
     {
-        text_viewer_set_status(ctx, esp_err_to_name(err));
-        ESP_LOGE(TAG, "Failed to save %s: %s", dest_path, esp_err_to_name(err));
-        sdspi_schedule_sd_retry();
+        text_viewer_set_status(ctx, "Range overflow");
         return;
+    }
+    size_t window_start = first_kb * 1024u;
+    size_t window_span = chunk_count * READ_CHUNK_SIZE_B;
+    size_t window_end = window_start + window_span;
+    if (window_end < window_start)
+    {
+        text_viewer_set_status(ctx, "Range overflow");
+        return;
+    }
+
+    struct stat st = {0};
+    bool have_existing = (stat(dest_path, &st) == 0 && S_ISREG(st.st_mode));
+    size_t file_size = have_existing ? (size_t)st.st_size : 0u;
+
+    /* Clamp window to current file size to avoid seeking past EOF */
+    if (window_start > file_size)
+    {
+        window_start = file_size;
+    }
+    if (window_end > file_size)
+    {
+        window_end = file_size;
+    }
+
+    size_t prefix_size = window_start;
+    size_t suffix_start = window_end;
+    size_t suffix_size = (suffix_start < file_size) ? (file_size - suffix_start) : 0u;
+
+    /* Build temp path in same dir for atomic-ish replacement */
+    char dir[FS_TEXT_MAX_PATH];
+    const char *slash = strrchr(dest_path, '/');
+    if (slash)
+    {
+        size_t dir_len = (size_t)(slash - dest_path);
+        if (dir_len == 0)
+        {
+            dir[0] = '/';
+            dir[1] = '\0';
+        }
+        else if (dir_len < sizeof(dir))
+        {
+            memcpy(dir, dest_path, dir_len);
+            dir[dir_len] = '\0';
+        }
+        else
+        {
+            text_viewer_set_status(ctx, "Path too long");
+            return;
+        }
+    }
+    else
+    {
+        strlcpy(dir, ".", sizeof(dir));
+    }
+
+    char tmp_path[FS_TEXT_MAX_PATH];
+    int needed = snprintf(tmp_path, sizeof(tmp_path), "%s/tmpwrt.tmp", dir);
+    if (needed < 0 || needed >= (int)sizeof(tmp_path))
+    {
+        text_viewer_set_status(ctx, "Path too long");
+        return;
+    }
+    remove(tmp_path);
+
+    FILE *src = NULL;
+    if (have_existing)
+    {
+        src = fopen(dest_path, "rb");
+        if (!src)
+        {
+            text_viewer_set_status(ctx, "Open failed");
+            ESP_LOGE(TAG, "Failed to open %s for patching", dest_path);
+            sdspi_schedule_sd_retry();
+            return;
+        }
+    }
+
+    FILE *tmp = fopen(tmp_path, "wb");
+    if (!tmp)
+    {
+        if (src)
+        {
+            fclose(src);
+        }
+        text_viewer_set_status(ctx, "Temp open failed");
+        ESP_LOGE(TAG, "Failed to open %s", tmp_path);
+        return;
+    }
+
+    char buf[READ_CHUNK_SIZE_B];
+    size_t remaining = prefix_size;
+    while (remaining > 0)
+    {
+        size_t chunk = remaining > sizeof(buf) ? sizeof(buf) : remaining;
+        if (!src || fread(buf, 1, chunk, src) != chunk)
+        {
+            text_viewer_set_status(ctx, "Read failed");
+            ESP_LOGE(TAG, "Failed to read prefix from %s", dest_path);
+            sdspi_schedule_sd_retry();
+            goto save_cleanup;
+        }
+        if (fwrite(buf, 1, chunk, tmp) != chunk)
+        {
+            text_viewer_set_status(ctx, "Write failed");
+            ESP_LOGE(TAG, "Failed to write prefix to %s", tmp_path);
+            sdspi_schedule_sd_retry();
+            goto save_cleanup;
+        }
+        remaining -= chunk;
+    }
+
+    size_t text_len = strlen(text);
+    if (text_len > 0)
+    {
+        if (fwrite(text, 1, text_len, tmp) != text_len)
+        {
+            text_viewer_set_status(ctx, "Write failed");
+            ESP_LOGE(TAG, "Failed to write textarea to %s", tmp_path);
+            sdspi_schedule_sd_retry();
+            goto save_cleanup;
+        }
+    }
+
+    if (suffix_size > 0 && src)
+    {
+        if (fseek(src, (long)suffix_start, SEEK_SET) != 0)
+        {
+            text_viewer_set_status(ctx, "Seek failed");
+            ESP_LOGE(TAG, "Failed to seek %s to %zu", dest_path, suffix_start);
+            sdspi_schedule_sd_retry();
+            goto save_cleanup;
+        }
+
+        remaining = suffix_size;
+        while (remaining > 0)
+        {
+            size_t chunk = remaining > sizeof(buf) ? sizeof(buf) : remaining;
+            size_t got = fread(buf, 1, chunk, src);
+            if (got != chunk)
+            {
+                text_viewer_set_status(ctx, "Read failed");
+                ESP_LOGE(TAG, "Failed to read suffix from %s", dest_path);
+                sdspi_schedule_sd_retry();
+                goto save_cleanup;
+            }
+            if (fwrite(buf, 1, chunk, tmp) != chunk)
+            {
+                text_viewer_set_status(ctx, "Write failed");
+                ESP_LOGE(TAG, "Failed to write suffix to %s", tmp_path);
+                sdspi_schedule_sd_retry();
+                goto save_cleanup;
+            }
+            remaining -= chunk;
+        }
+    }
+
+    if (src)
+    {
+        fclose(src);
+        src = NULL;
+    }
+    fclose(tmp);
+    tmp = NULL;
+
+    if (rename(tmp_path, dest_path) != 0)
+    {
+        if (errno == EEXIST && remove(dest_path) == 0 && rename(tmp_path, dest_path) == 0)
+        {
+            /* success after replacing existing */
+        }
+        else
+        {
+            text_viewer_set_status(ctx, "Rename failed");
+            ESP_LOGE(TAG, "rename(%s -> %s) failed (errno=%d)", tmp_path, dest_path, errno);
+            remove(tmp_path);
+            sdspi_schedule_sd_retry();
+            return;
+        }
     }
 
     text_viewer_set_original(ctx, text);
     ctx->dirty = false;
     text_viewer_set_status(ctx, "Saved");
+    return;
+
+save_cleanup:
+    if (src)
+    {
+        fclose(src);
+    }
+    if (tmp)
+    {
+        fclose(tmp);
+    }
+    remove(tmp_path);
 }
 
 static void text_viewer_on_save(lv_event_t *e)
