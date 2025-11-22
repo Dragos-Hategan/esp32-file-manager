@@ -13,6 +13,25 @@
 #include "sd_card.h"
 
 /**
+ * @brief Actions in the chunk-change prompt.
+ */
+typedef enum
+{
+    TEXT_VIEWER_CHUNK_SAVE = 1,    /**< Save before loading new chunk */
+    TEXT_VIEWER_CHUNK_DISCARD = 2, /**< Discard changes and load new chunk */
+} text_viewer_chunk_action_t;
+
+/**
+ * @brief Actions to resume after SD reconnection.
+ */
+typedef enum
+{
+    TEXT_VIEWER_SD_NONE = 0,
+    TEXT_VIEWER_SD_SAVE,
+    TEXT_VIEWER_SD_CHUNK,
+} text_viewer_sd_action_t;
+
+/**
  * @brief Runtime state for the singleton text viewer/editor screen.
  */
 typedef struct
@@ -39,6 +58,7 @@ typedef struct
     lv_obj_t *chunk_mbox;               /**< Chunk-change confirmation message box */
     lv_obj_t *name_dialog;              /**< Filename prompt dialog */
     lv_obj_t *name_textarea;            /**< Text area used inside filename dialog */
+    lv_timer_t *sd_retry_timer;         /**< Timer to poll SD reconnection */
     text_viewer_close_cb_t close_cb;    /**< Optional close callback */
     void *close_ctx;                    /**< User context for close callback */
     char path[FS_TEXT_MAX_PATH];        /**< Current file path */
@@ -49,6 +69,8 @@ typedef struct
     size_t pending_second_offset_kb;    /**< Pending second chunk offset when prompting */
     bool pending_scroll_up;             /**< True if pending load comes from top edge */
     bool pending_chunk;                 /**< True if a chunk load is pending confirmation */
+    bool waiting_sd;                    /**< True while waiting SD reconnection */
+    text_viewer_sd_action_t sd_retry_action; /**< Pending action after SD reconnect */
 } text_viewer_ctx_t;
 
 /**
@@ -59,15 +81,6 @@ typedef enum
     TEXT_VIEWER_CONFIRM_SAVE = 1,    /**< Confirm saving changes */
     TEXT_VIEWER_CONFIRM_DISCARD = 2, /**< Confirm discarding changes */
 } text_viewer_confirm_action_t;
-
-/**
- * @brief Actions in the chunk-change prompt.
- */
-typedef enum
-{
-    TEXT_VIEWER_CHUNK_SAVE = 1,    /**< Save before loading new chunk */
-    TEXT_VIEWER_CHUNK_DISCARD = 2, /**< Discard changes and load new chunk */
-} text_viewer_chunk_action_t;
 
 static const char *TAG = "text_viewer";
 
@@ -319,6 +332,21 @@ static void text_viewer_apply_pending_chunk(text_viewer_ctx_t *ctx);
  */
 static void text_viewer_request_chunk_load(text_viewer_ctx_t *ctx, size_t first_offset_kb, size_t second_offset_kb, bool from_top);
 
+/**
+ * @brief Poll SD reconnection and retry pending actions.
+ *
+ * @param timer LVGL timer.
+ */
+static void text_viewer_on_sd_retry_timer(lv_timer_t *timer);
+
+/**
+ * @brief Schedule SD reconnection prompt and retry logic.
+ *
+ * @param ctx Viewer context.
+ * @param action Action to retry after reconnection.
+ */
+static void text_viewer_schedule_sd_retry(text_viewer_ctx_t *ctx, text_viewer_sd_action_t action);
+
 /*********************************************************************************************/
 
 /**
@@ -523,12 +551,15 @@ esp_err_t text_viewer_open(const text_viewer_open_opts_t *opts)
     ctx->name_dialog = NULL;
     ctx->name_textarea = NULL;
     ctx->chunk_mbox = NULL;
+    ctx->sd_retry_timer = NULL;
     ctx->at_top_edge = false;
     ctx->at_bottom_edge = false;
     ctx->pending_chunk = false;
     ctx->pending_first_offset_kb = 0;
     ctx->pending_second_offset_kb = 0;
     ctx->pending_scroll_up = false;
+    ctx->waiting_sd = false;
+    ctx->sd_retry_action = TEXT_VIEWER_SD_NONE;
 
     if (new_file)
     {
@@ -800,6 +831,10 @@ static void text_viewer_on_text_scrolled(lv_event_t *e)
     {
         return;
     }
+    if (ctx->waiting_sd)
+    {
+        return;
+    }
     if (ctx->chunk_mbox || ctx->pending_chunk)
     {
         return;
@@ -919,6 +954,11 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
     {
         return;
     }
+    if (ctx->waiting_sd)
+    {
+        text_viewer_set_status(ctx, "Reconnect SD");
+        return;
+    }
     if (ctx->new_file && ctx->path[0] == '\0')
     {
         text_viewer_show_name_dialog(ctx);
@@ -1019,7 +1059,7 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
         {
             text_viewer_set_status(ctx, "Open failed");
             ESP_LOGE(TAG, "Failed to open %s for patching", dest_path);
-            sdspi_schedule_sd_retry();
+            text_viewer_schedule_sd_retry(ctx, TEXT_VIEWER_SD_SAVE);
             return;
         }
     }
@@ -1033,6 +1073,7 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
         }
         text_viewer_set_status(ctx, "Temp open failed");
         ESP_LOGE(TAG, "Failed to open %s", tmp_path);
+        text_viewer_schedule_sd_retry(ctx, TEXT_VIEWER_SD_SAVE);
         return;
     }
 
@@ -1045,14 +1086,14 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
         {
             text_viewer_set_status(ctx, "Read failed");
             ESP_LOGE(TAG, "Failed to read prefix from %s", dest_path);
-            sdspi_schedule_sd_retry();
+            text_viewer_schedule_sd_retry(ctx, TEXT_VIEWER_SD_SAVE);
             goto save_cleanup;
         }
         if (fwrite(buf, 1, chunk, tmp) != chunk)
         {
             text_viewer_set_status(ctx, "Write failed");
             ESP_LOGE(TAG, "Failed to write prefix to %s", tmp_path);
-            sdspi_schedule_sd_retry();
+            text_viewer_schedule_sd_retry(ctx, TEXT_VIEWER_SD_SAVE);
             goto save_cleanup;
         }
         remaining -= chunk;
@@ -1065,7 +1106,7 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
         {
             text_viewer_set_status(ctx, "Write failed");
             ESP_LOGE(TAG, "Failed to write textarea to %s", tmp_path);
-            sdspi_schedule_sd_retry();
+            text_viewer_schedule_sd_retry(ctx, TEXT_VIEWER_SD_SAVE);
             goto save_cleanup;
         }
     }
@@ -1076,7 +1117,7 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
         {
             text_viewer_set_status(ctx, "Seek failed");
             ESP_LOGE(TAG, "Failed to seek %s to %zu", dest_path, suffix_start);
-            sdspi_schedule_sd_retry();
+            text_viewer_schedule_sd_retry(ctx, TEXT_VIEWER_SD_SAVE);
             goto save_cleanup;
         }
 
@@ -1089,14 +1130,14 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
             {
                 text_viewer_set_status(ctx, "Read failed");
                 ESP_LOGE(TAG, "Failed to read suffix from %s", dest_path);
-                sdspi_schedule_sd_retry();
+                text_viewer_schedule_sd_retry(ctx, TEXT_VIEWER_SD_SAVE);
                 goto save_cleanup;
             }
             if (fwrite(buf, 1, chunk, tmp) != chunk)
             {
                 text_viewer_set_status(ctx, "Write failed");
                 ESP_LOGE(TAG, "Failed to write suffix to %s", tmp_path);
-                sdspi_schedule_sd_retry();
+                text_viewer_schedule_sd_retry(ctx, TEXT_VIEWER_SD_SAVE);
                 goto save_cleanup;
             }
             remaining -= chunk;
@@ -1122,7 +1163,7 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
             text_viewer_set_status(ctx, "Rename failed");
             ESP_LOGE(TAG, "rename(%s -> %s) failed (errno=%d)", tmp_path, dest_path, errno);
             remove(tmp_path);
-            sdspi_schedule_sd_retry();
+            text_viewer_schedule_sd_retry(ctx, TEXT_VIEWER_SD_SAVE);
             return;
         }
     }
@@ -1215,6 +1256,10 @@ static void text_viewer_apply_pending_chunk(text_viewer_ctx_t *ctx)
     {
         return;
     }
+    if (ctx->waiting_sd)
+    {
+        return;
+    }
 
     esp_err_t err = text_viewer_load_window(ctx, ctx->pending_first_offset_kb, ctx->pending_second_offset_kb);
     if (err == ESP_OK)
@@ -1224,23 +1269,24 @@ static void text_viewer_apply_pending_chunk(text_viewer_ctx_t *ctx)
         {
             lv_textarea_set_cursor_pos(ctx->text_area, (int32_t)READ_CHUNK_SIZE_B + content_h);
             text_viewer_skip_cursor_animation(ctx);
-            ctx->lasf_file_offset_kb = ctx->pending_first_offset_kb;
-            ctx->current_file_offset_kb = ctx->pending_second_offset_kb;
-            ctx->at_bottom_edge = false;
         }
         else
         {
             lv_textarea_set_cursor_pos(ctx->text_area, (int32_t)READ_CHUNK_SIZE_B - content_h);
             text_viewer_skip_cursor_animation(ctx);
-            ctx->lasf_file_offset_kb = ctx->pending_first_offset_kb;
-            ctx->current_file_offset_kb = ctx->pending_second_offset_kb;
-            ctx->at_top_edge = false;
         }
+        ctx->lasf_file_offset_kb = ctx->pending_first_offset_kb;
+        ctx->current_file_offset_kb = ctx->pending_second_offset_kb;
+        ctx->at_top_edge = false;
+        ctx->at_bottom_edge = false;
     }
     else
     {
         ESP_LOGE(TAG, "Failed to load chunk: %s", esp_err_to_name(err));
-        sdspi_schedule_sd_retry();
+        text_viewer_schedule_sd_retry(ctx, TEXT_VIEWER_SD_CHUNK);
+        ctx->at_top_edge = false;
+        ctx->at_bottom_edge = false;
+        return;
     }
     ctx->pending_chunk = false;
 }
@@ -1262,9 +1308,11 @@ static void text_viewer_on_chunk_prompt(lv_event_t *e)
         {
             text_viewer_apply_pending_chunk(ctx);
         }
-        else
+        else if (!ctx->waiting_sd)
         {
             ctx->pending_chunk = false;
+            ctx->at_top_edge = false;
+            ctx->at_bottom_edge = false;
         }
     }
     else if (ud == (void *)TEXT_VIEWER_CHUNK_DISCARD)
@@ -1276,6 +1324,8 @@ static void text_viewer_on_chunk_prompt(lv_event_t *e)
     else
     {
         ctx->pending_chunk = false; // Cancel
+        ctx->at_top_edge = false;
+        ctx->at_bottom_edge = false;
     }
 }
 
@@ -1283,6 +1333,14 @@ static void text_viewer_request_chunk_load(text_viewer_ctx_t *ctx, size_t first_
 {
     if (!ctx || ctx->chunk_mbox)
     {
+        return;
+    }
+    if (ctx->waiting_sd)
+    {
+        ctx->pending_first_offset_kb = first_offset_kb;
+        ctx->pending_second_offset_kb = second_offset_kb;
+        ctx->pending_scroll_up = from_top;
+        ctx->pending_chunk = true;
         return;
     }
 
@@ -1298,6 +1356,61 @@ static void text_viewer_request_chunk_load(text_viewer_ctx_t *ctx, size_t first_
     else
     {
         text_viewer_apply_pending_chunk(ctx);
+    }
+}
+
+static void text_viewer_on_sd_retry_timer(lv_timer_t *timer)
+{
+    text_viewer_ctx_t *ctx = lv_timer_get_user_data(timer);
+    if (!ctx || !ctx->waiting_sd)
+    {
+        return;
+    }
+    if (!reconnection_success)
+    {
+        text_viewer_set_status(ctx, "Reconnect SD");
+        return;
+    }
+    if (xSemaphoreTake(reconnection_success, 0) != pdTRUE)
+    {
+        text_viewer_set_status(ctx, "Reconnect SD");
+        return;
+    }
+
+    ctx->waiting_sd = false;
+    text_viewer_sd_action_t action = ctx->sd_retry_action;
+    ctx->sd_retry_action = TEXT_VIEWER_SD_NONE;
+    text_viewer_set_status(ctx, "SD reconnected");
+
+    if (action == TEXT_VIEWER_SD_SAVE)
+    {
+        text_viewer_handle_save(ctx);
+    }
+    else if (action == TEXT_VIEWER_SD_CHUNK)
+    {
+        text_viewer_apply_pending_chunk(ctx);
+    }
+}
+
+static void text_viewer_schedule_sd_retry(text_viewer_ctx_t *ctx, text_viewer_sd_action_t action)
+{
+    if (!ctx)
+    {
+        return;
+    }
+    if (ctx->waiting_sd)
+    {
+        ctx->sd_retry_action = action;
+        return;
+    }
+    ctx->waiting_sd = true;
+    ctx->sd_retry_action = action;
+    text_viewer_set_status(ctx, "Reconnect SD");
+    sdspi_schedule_sd_retry();
+
+    if (!ctx->sd_retry_timer)
+    {
+        ctx->sd_retry_timer = lv_timer_create(text_viewer_on_sd_retry_timer, 250, ctx);
     }
 }
 
@@ -1585,6 +1698,11 @@ static void text_viewer_close(text_viewer_ctx_t *ctx, bool changed)
     text_viewer_close_confirm(ctx);
     text_viewer_close_chunk_prompt(ctx);
     text_viewer_close_name_dialog(ctx);
+    if (ctx->sd_retry_timer)
+    {
+        lv_timer_del(ctx->sd_retry_timer);
+        ctx->sd_retry_timer = NULL;
+    }
     ctx->active = false;
     ctx->editable = false;
     ctx->dirty = false;
@@ -1593,6 +1711,8 @@ static void text_viewer_close(text_viewer_ctx_t *ctx, bool changed)
     ctx->directory[0] = '\0';
     ctx->pending_name[0] = '\0';
     ctx->pending_chunk = false;
+    ctx->waiting_sd = false;
+    ctx->sd_retry_action = TEXT_VIEWER_SD_NONE;
     lv_keyboard_set_textarea(ctx->keyboard, NULL);
     lv_obj_add_flag(ctx->keyboard, LV_OBJ_FLAG_HIDDEN);
     free(ctx->original_text);
