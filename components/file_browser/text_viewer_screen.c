@@ -71,6 +71,7 @@ typedef struct
     bool pending_chunk;                 /**< True if a chunk load is pending confirmation */
     bool waiting_sd;                    /**< True while waiting SD reconnection */
     text_viewer_sd_action_t sd_retry_action; /**< Pending action after SD reconnect */
+    bool content_changed;               /**< True if file was saved during session */
 } text_viewer_ctx_t;
 
 /**
@@ -560,6 +561,7 @@ esp_err_t text_viewer_open(const text_viewer_open_opts_t *opts)
     ctx->pending_scroll_up = false;
     ctx->waiting_sd = false;
     ctx->sd_retry_action = TEXT_VIEWER_SD_NONE;
+    ctx->content_changed = false;
 
     if (new_file)
     {
@@ -1183,6 +1185,7 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
 
     text_viewer_set_original(ctx, text);
     ctx->dirty = false;
+    ctx->content_changed = true;
     text_viewer_set_status(ctx, "Saved");
     return;
 
@@ -1730,6 +1733,7 @@ static void text_viewer_close(text_viewer_ctx_t *ctx, bool changed)
     ctx->pending_chunk = false;
     ctx->waiting_sd = false;
     ctx->sd_retry_action = TEXT_VIEWER_SD_NONE;
+    ctx->content_changed = false;
     lv_keyboard_set_textarea(ctx->keyboard, NULL);
     lv_obj_add_flag(ctx->keyboard, LV_OBJ_FLAG_HIDDEN);
     free(ctx->original_text);
@@ -1740,6 +1744,6 @@ static void text_viewer_close(text_viewer_ctx_t *ctx, bool changed)
     }
     if (ctx->close_cb)
     {
-        ctx->close_cb(changed, ctx->close_ctx);
+        ctx->close_cb(true, ctx->close_ctx); // Force refresh in caller (e.g., file browser list)
     }
 }
