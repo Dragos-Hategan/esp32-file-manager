@@ -162,13 +162,25 @@ static void main_task(void *arg)
 void app_main(void)
 {
     xTaskCreatePinnedToCore(main_task, "MyTask", 8 * 1024, NULL, 1, NULL, 0);
-
+    size_t last_free_heap = 0;
+    size_t min_free_heap = UINT_MAX;
+    size_t max_free_heap = 0;
+    
     while (1){
         size_t free_heap = esp_get_free_heap_size();
-        size_t min_free_heap = esp_get_minimum_free_heap_size();
-        size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT);
- 
-        printf("free=%u  min=%u max=%u\n", free_heap, min_free_heap, largest_block);
+
+        if (free_heap < min_free_heap){
+            min_free_heap = free_heap;
+        }
+
+        if (free_heap > max_free_heap){
+            max_free_heap = free_heap;
+        }
+
+        if (free_heap != last_free_heap){
+            printf("----- HEAP INFO ----- free=%u  min_free_heap_ever=%u max_free_heap_ever=%u ----- HEAP INFO ----- \n", free_heap, min_free_heap, max_free_heap);
+            last_free_heap = free_heap;
+        }
 
         vTaskDelay(pdMS_TO_TICKS(100));
     }
