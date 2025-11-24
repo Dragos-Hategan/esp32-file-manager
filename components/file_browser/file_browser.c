@@ -192,14 +192,27 @@ static void file_browser_wait_for_reconnection_task(void* arg);
 /***************************** List Interactions & Text Editor Bridge *****************************/
 
 /**
- * @brief Entry click handler: enter directories or log selected file.
+ * @brief Entry click handler: enter directories, open viewers or show prompt.
  *
  * If the clicked entry is a directory, enters it and refreshes the view.
- * If it is a file, only logs selection.
+ * If it is a supported file, opens an appropriate viewer. Otherwise, shows
+ * an informational prompt.
  *
  * @param e LVGL event (CLICKED) with user data = @c file_browser_ctx_t*.
  */
  static void file_browser_on_entry_click(lv_event_t *e);
+
+/**
+ * @brief Show an informational prompt for unsupported file formats.
+ */
+ static void file_browser_show_unsupported_prompt(void);
+
+/**
+ * @brief Close handler for the unsupported-format prompt.
+ *
+ * @param e LVGL event (CLICKED) with user data = message box to close.
+ */
+ static void file_browser_on_unsupported_ok(lv_event_t *e);
 
 /**
  * @brief Long-press handler for a list entry to open the action menu.
@@ -931,6 +944,30 @@ static esp_err_t file_browser_reload(void)
     return ESP_OK;
 }
 
+static void file_browser_show_unsupported_prompt(void)
+{
+    lv_obj_t *mbox = lv_msgbox_create(NULL);
+    lv_obj_set_style_max_width(mbox, LV_PCT(80), 0);
+    lv_obj_center(mbox);
+
+    lv_obj_t *label = lv_label_create(mbox);
+    lv_label_set_text(label, "This file format is not yet supported.");
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+
+    lv_obj_t *ok_btn = lv_msgbox_add_footer_button(mbox, "OK");
+    lv_obj_add_event_cb(ok_btn, file_browser_on_unsupported_ok, LV_EVENT_CLICKED, mbox);
+}
+
+static void file_browser_on_unsupported_ok(lv_event_t *e)
+{
+    lv_obj_t *mbox = lv_event_get_user_data(e);
+    if (mbox) {
+        lv_msgbox_close(mbox);
+    }
+}
+
 static void file_browser_on_entry_click(lv_event_t *e)
 {
     file_browser_ctx_t *ctx = lv_event_get_user_data(e);
@@ -989,7 +1026,7 @@ static void file_browser_on_entry_click(lv_event_t *e)
         return;
     }
 
-    ESP_LOGI(TAG, "File selected (no handler): %s (%zu bytes)", entry->name, entry->size_bytes);
+    file_browser_show_unsupported_prompt();
 }
 
 static void file_browser_on_entry_long_press(lv_event_t *e)
