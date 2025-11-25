@@ -20,6 +20,9 @@ typedef struct {
     uint16_t *stripe;               /* DMA-capable stripe buffer */
     uint32_t stripe_w;
     uint32_t stripe_h;
+    uint16_t disp_w;
+    uint16_t disp_h;
+    uint8_t scale;
 } jpg_stripe_ctx_t;
 
 typedef struct {
@@ -75,6 +78,7 @@ static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx, const char *path);
  *      - ESP_ERR_INVALID_ARG if img or path is invalid
  *      - ESP_ERR_INVALID_STATE if no valid panel is available
  *      - ESP_ERR_NOT_SUPPORTED if the jpg file is corrupted or it's specific type is not supported
+ *      - ESP_ERR_INVALID_SIZE if the image can't fit in the screen even after the downscale
  */
 static esp_err_t jpg_handler_set_src(lv_obj_t *img, const char *path);
 
@@ -151,6 +155,7 @@ static int output_cb(JDEC *jd, void *bitmap, JRECT *rect);
  *      - ESP_FAIL on file open, decoder prepare or decode failure
  *      - ESP_ERR_NO_MEM if the stripe buffer allocation fails
  *      - ESP_ERR_NOT_SUPPORTED if the jpg file is corrupted or it's specific type is not supported
+ *      - ESP_ERR_INVALID_SIZE if the image can't fit in the screen even after the downscale
  */
 static esp_err_t jpg_draw_striped(const char *path, esp_lcd_panel_handle_t panel);
 
@@ -337,23 +342,54 @@ static int output_cb(JDEC *jd, void *bitmap, JRECT *rect)
 
     uint8_t *src = (uint8_t *)bitmap; /* RGB888 from tjpgd (JD_FORMAT=0) */
     uint16_t *dst = ctx->stripe;
+    const int src_stride = (int)(jd->msx * 8); /* tjpgd always outputs full MCU width */
+    const int scale = ctx->scale;
     for (int y = 0; y < h; y++) {
+        const int sy = y << scale; /* top-left sampling for downscale */
+        uint8_t *src_row = src + (sy * src_stride * 3);
+        uint16_t *dst_row = dst + y * w;
         for (int x = 0; x < w; x++) {
-            int idx = (y * w + x) * 3;
+            const int sx = x << scale;
+            int idx = sx * 3;
             /* Panel is configured BGR; swap R and B, then pack RGB565 and swap bytes */
-            uint8_t b = src[idx];
-            uint8_t g = src[idx + 1];
-            uint8_t r = src[idx + 2];
+            uint8_t b = src_row[idx];
+            uint8_t g = src_row[idx + 1];
+            uint8_t r = src_row[idx + 2];
             uint16_t c = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
             c = (uint16_t)((c >> 8) | (c << 8));
-            dst[y * w + x] = c;
+            dst_row[x] = c;
         }
     }
 
-    esp_lcd_panel_draw_bitmap(ctx->panel,
-                              rect->left, rect->top,
-                              rect->right + 1, rect->bottom + 1,
-                              dst);
+    /* Clip to panel bounds to avoid wrap-around when images exceed display size */
+    if (rect->left >= ctx->disp_w || rect->top >= ctx->disp_h) {
+        return 1;
+    }
+
+    const int draw_left = rect->left;
+    const int draw_top = rect->top;
+    const int draw_right = (rect->right < (ctx->disp_w - 1)) ? rect->right : (int)(ctx->disp_w - 1);
+    const int draw_bottom = (rect->bottom < (ctx->disp_h - 1)) ? rect->bottom : (int)(ctx->disp_h - 1);
+    const int clipped_w = draw_right - draw_left + 1;
+    const int clipped_h = draw_bottom - draw_top + 1;
+
+    if (clipped_w <= 0 || clipped_h <= 0) {
+        return 1;
+    }
+
+    if (clipped_w == w && clipped_h == h) {
+        esp_lcd_panel_draw_bitmap(ctx->panel,
+                                  draw_left, draw_top,
+                                  draw_right + 1, draw_bottom + 1,
+                                  dst);
+    } else {
+        for (int row = 0; row < clipped_h; row++) {
+            esp_lcd_panel_draw_bitmap(ctx->panel,
+                                      draw_left, draw_top + row,
+                                      draw_left + clipped_w, draw_top + row + 1,
+                                      dst + (row * w));
+        }
+    }
     return 1; /* continue */
 }
 
@@ -365,6 +401,9 @@ static esp_err_t jpg_draw_striped(const char *path, esp_lcd_panel_handle_t panel
         .stripe = NULL,
         .stripe_w = 0,
         .stripe_h = 0,
+        .disp_w = BSP_LCD_H_RES,
+        .disp_h = BSP_LCD_V_RES,
+        .scale = 0,
     };
 
     lv_fs_res_t res = lv_fs_open(&ctx.file, path, LV_FS_MODE_RD);
@@ -387,9 +426,32 @@ static esp_err_t jpg_draw_striped(const char *path, esp_lcd_panel_handle_t panel
         goto cleanup;
     }
 
-    /* MCU height = msy * 8 lines; width can be up to image width */
-    ctx.stripe_w = jd.width;
-    ctx.stripe_h = jd.msy * 8;
+    /* Choose the smallest power-of-two downscale that fits the panel */
+    uint32_t scaled_w = jd.width;
+    uint32_t scaled_h = jd.height;
+    while (ctx.scale < 3 && (scaled_w > ctx.disp_w || scaled_h > ctx.disp_h)) {
+        ctx.scale++;
+        scaled_w = (scaled_w + 1) >> 1;
+        scaled_h = (scaled_h + 1) >> 1;
+    }
+
+    if (scaled_w > ctx.disp_w || scaled_h > ctx.disp_h) {
+        ESP_LOGE(TAG, "Image %ux%u is too large to fit display %ux%u even at 1/%u scale",
+                 jd.width, jd.height, ctx.disp_w, ctx.disp_h, 1U << ctx.scale);
+        err = ESP_ERR_INVALID_SIZE;
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "Drawing JPEG %ux%u scaled 1/%u -> %lux%lu",
+             jd.width, jd.height, 1U << ctx.scale,
+             (unsigned long)scaled_w, (unsigned long)scaled_h);
+
+    /* MCU height = msy * 8 lines; width capped to scaled image width */
+    ctx.stripe_w = scaled_w;
+    ctx.stripe_h = (uint32_t)((jd.msy * 8u) >> ctx.scale);
+    if (ctx.stripe_h == 0) {
+        ctx.stripe_h = 1;
+    }
     size_t stripe_size = ctx.stripe_w * ctx.stripe_h * sizeof(uint16_t);
     ESP_LOGW(TAG, "Stripe size is %lu", stripe_size);
     ctx.stripe = heap_caps_malloc(stripe_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
@@ -399,7 +461,7 @@ static esp_err_t jpg_draw_striped(const char *path, esp_lcd_panel_handle_t panel
         goto cleanup;
     }
 
-    rc = jd_decomp(&jd, output_cb, 0); /* scale 0 = full res */
+    rc = jd_decomp(&jd, output_cb, ctx.scale); /* scale: 0=full, 1=1/2, 2=1/4, 3=1/8 */
     if (rc != JDR_OK) {
         ESP_LOGE(TAG, "Failed to draw image, JRESULT: (%d)", rc);
         err = ESP_FAIL;
