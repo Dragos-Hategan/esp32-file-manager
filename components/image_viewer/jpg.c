@@ -184,6 +184,7 @@ esp_err_t jpg_viewer_open(const jpg_viewer_open_opts_t *opts)
 
     esp_err_t err = jpg_handler_set_src(ctx->image, opts->path);
     if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to render image: (%s)", esp_err_to_name(err));
         if (ctx->previous_screen) {
             lv_screen_load(ctx->previous_screen);
         }
@@ -227,7 +228,6 @@ static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx, const char *path)
     lv_obj_set_style_bg_color(ctx->screen, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(ctx->screen, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(ctx->screen, 0, 0);
-    lv_obj_add_flag(ctx->screen, LV_OBJ_FLAG_CLICKABLE);
 
     ctx->image = lv_image_create(ctx->screen);
     lv_obj_center(ctx->image);
@@ -368,6 +368,7 @@ static esp_err_t jpg_draw_striped(const char *path, esp_lcd_panel_handle_t panel
 
     lv_fs_res_t res = lv_fs_open(&ctx.file, path, LV_FS_MODE_RD);
     if (res != LV_FS_RES_OK) {
+        ESP_LOGE(TAG, "Failed to open image file");
         return ESP_FAIL;
     }
 
@@ -376,6 +377,7 @@ static esp_err_t jpg_draw_striped(const char *path, esp_lcd_panel_handle_t panel
     JDEC jd;
     JRESULT rc = jd_prepare(&jd, input_cb, workb, sizeof(workb), &ctx);
     if (rc != JDR_OK) {
+        ESP_LOGE(TAG, "Failed to initialize tjpgd decoder");
         err = ESP_FAIL;
         goto cleanup;
     }
@@ -386,12 +388,14 @@ static esp_err_t jpg_draw_striped(const char *path, esp_lcd_panel_handle_t panel
     size_t stripe_size = ctx.stripe_w * ctx.stripe_h * sizeof(uint16_t);
     ctx.stripe = heap_caps_malloc(stripe_size, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (!ctx.stripe) {
+        ESP_LOGE(TAG, "Failed to allocate memory for the stripe buffer used for image draw");
         err = ESP_ERR_NO_MEM;
         goto cleanup;
     }
 
     rc = jd_decomp(&jd, output_cb, 0); /* scale 0 = full res */
     if (rc != JDR_OK) {
+        ESP_LOGE(TAG, "Failed to draw image");
         err = ESP_FAIL;
     }
 
