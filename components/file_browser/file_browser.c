@@ -208,6 +208,11 @@ static void file_browser_wait_for_reconnection_task(void* arg);
 static void file_browser_show_unsupported_prompt(void);
 
 /**
+ * @brief Show an informational prompt for too big image resolution.
+ */
+static void file_browser_show_image_resolution_too_large_to_display_prompt(void);
+
+/**
  * @brief Show an informational prompt for not enough memory or image too large.
  */
 static void file_browser_show_not_enough_memory_prompt(void);
@@ -934,7 +939,10 @@ static void file_browser_handle_jpeg(file_browser_ctx_t *ctx, const fs_nav_entry
         } else if (err == ESP_ERR_NO_MEM){
             ESP_LOGE(TAG, "The image is too large or there is no more internal memory to open it.");
             file_browser_show_not_enough_memory_prompt();
-        }else{            
+        }else if (err == ESP_ERR_INVALID_SIZE){
+            ESP_LOGE(TAG, "The image resolution is too large do display.");
+            file_browser_show_image_resolution_too_large_to_display_prompt();
+        }else{
             ESP_LOGE(TAG, "Failed to open JPEG \"%s\": %s", path, esp_err_to_name(err));
             sdspi_schedule_sd_retry();
         }
@@ -970,6 +978,22 @@ static void file_browser_show_unsupported_prompt(void)
 
     lv_obj_t *label = lv_label_create(mbox);
     lv_label_set_text(label, "This file format is not yet supported.");
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+
+    lv_obj_t *ok_btn = lv_msgbox_add_footer_button(mbox, "OK");
+    lv_obj_add_event_cb(ok_btn, file_browser_on_unsupported_ok, LV_EVENT_CLICKED, mbox);
+}
+
+static void file_browser_show_image_resolution_too_large_to_display_prompt(void)
+{
+    lv_obj_t *mbox = lv_msgbox_create(NULL);
+    lv_obj_set_style_max_width(mbox, LV_PCT(80), 0);
+    lv_obj_center(mbox);
+
+    lv_obj_t *label = lv_label_create(mbox);
+    lv_label_set_text(label, "The image resolution is too large do display.");
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(label, LV_PCT(100));
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);

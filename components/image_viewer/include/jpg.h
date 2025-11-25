@@ -26,6 +26,7 @@ typedef struct {
  *         - ESP_ERR_NOT_FOUND if the file is missing
  *         - ESP_ERR_TIMEOUT if display lock cannot be acquired, or ESP_FAIL on LVGL source set failure.
  *         - ESP_ERR_NOT_SUPPORTED if the jpg file is corrupted or it's specific type is not supported
+ *         - ESP_ERR_INVALID_SIZE if the image can't fit in the screen even after the downscale
  */
 esp_err_t jpg_viewer_open(const jpg_viewer_open_opts_t *opts);
 
