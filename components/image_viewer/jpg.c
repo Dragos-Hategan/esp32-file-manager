@@ -54,12 +54,6 @@ static void jpg_viewer_destroy_active(jpg_viewer_ctx_t *ctx);
 static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx, const char *path);
 static void jpg_viewer_reset(jpg_viewer_ctx_t *ctx);
 static void jpg_viewer_on_close(lv_event_t *e);
-static void jpg_viewer_on_screen_tap(lv_event_t *e);
-static void jpg_viewer_start_dim_timer(jpg_viewer_ctx_t *ctx);
-static void jpg_viewer_dim_cb(lv_timer_t *timer);
-static void jpg_viewer_set_close_opacity(jpg_viewer_ctx_t *ctx, lv_opa_t opa);
-static void jpg_viewer_restore_close_opacity(jpg_viewer_ctx_t *ctx);
-static void jpg_viewer_anim_set_btn_opa(void *obj, int32_t v);
 
 esp_err_t jpg_viewer_open(const jpg_viewer_open_opts_t *opts)
 {
@@ -104,7 +98,7 @@ esp_err_t jpg_viewer_open(const jpg_viewer_open_opts_t *opts)
 
     ESP_LOGW("", "After jpg_handler_set_src");
 
-    jpg_viewer_restore_close_opacity(ctx);
+    lv_obj_set_style_opa(ctx->close_btn, LV_OPA_100, LV_PART_MAIN);
 
     bsp_display_unlock();
 
@@ -133,22 +127,23 @@ static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx, const char *path)
 {
     ctx->screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(ctx->screen, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_bg_opa(ctx->screen, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(ctx->screen, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(ctx->screen, 0, 0);
     lv_obj_add_flag(ctx->screen, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(ctx->screen, jpg_viewer_on_screen_tap, LV_EVENT_CLICKED, ctx);
 
     ctx->image = lv_image_create(ctx->screen);
     lv_obj_center(ctx->image);
 
     lv_obj_t *close_btn = lv_button_create(ctx->screen);
     ctx->close_btn = close_btn;
-    lv_obj_set_size(close_btn, 32, 32);
+    lv_obj_remove_style_all(close_btn);
+    lv_obj_set_size(close_btn, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(close_btn, 3, 0);
+    lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
+    lv_obj_add_event_cb(close_btn, jpg_viewer_on_close, LV_EVENT_CLICKED, ctx);
     lv_obj_t *close_lbl = lv_label_create(close_btn);
     lv_label_set_text(close_lbl, LV_SYMBOL_CLOSE);
     lv_obj_center(close_lbl);
-    lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
-    lv_obj_add_event_cb(close_btn, jpg_viewer_on_close, LV_EVENT_CLICKED, ctx);
 }
 
 static esp_err_t jpg_handler_set_src(lv_obj_t *img, const char *path)
@@ -204,65 +199,6 @@ static void jpg_viewer_on_close(lv_event_t *e)
 
     bsp_display_unlock();
     jpg_viewer_reset(ctx);
-}
-
-static void jpg_viewer_on_screen_tap(lv_event_t *e)
-{
-    jpg_viewer_ctx_t *ctx = lv_event_get_user_data(e);
-    if (!ctx) {
-        return;
-    }
-    jpg_viewer_restore_close_opacity(ctx);
-}
-
-static void jpg_viewer_start_dim_timer(jpg_viewer_ctx_t *ctx)
-{
-    if (!ctx) {
-        return;
-    }
-    if (ctx->dim_timer) {
-        lv_timer_reset(ctx->dim_timer);
-    } else {
-        ctx->dim_timer = lv_timer_create(jpg_viewer_dim_cb, 3000, ctx);
-    }
-}
-
-static void jpg_viewer_dim_cb(lv_timer_t *timer)
-{
-    jpg_viewer_ctx_t *ctx = lv_timer_get_user_data(timer);
-    if (!ctx) {
-        return;
-    }
-    jpg_viewer_set_close_opacity(ctx, LV_OPA_20);
-}
-
-static void jpg_viewer_set_close_opacity(jpg_viewer_ctx_t *ctx, lv_opa_t opa)
-{
-    if (!ctx || !ctx->close_btn) {
-        return;
-    }
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, ctx->close_btn);
-    lv_anim_set_values(&a, lv_obj_get_style_opa(ctx->close_btn, LV_PART_MAIN), opa);
-    lv_anim_set_time(&a, 250);
-    lv_anim_set_path_cb(&a, lv_anim_path_linear);
-    lv_anim_set_exec_cb(&a, jpg_viewer_anim_set_btn_opa);
-    lv_anim_start(&a);
-}
-
-static void jpg_viewer_restore_close_opacity(jpg_viewer_ctx_t *ctx)
-{
-    jpg_viewer_set_close_opacity(ctx, LV_OPA_COVER);
-    jpg_viewer_start_dim_timer(ctx);
-}
-
-static void jpg_viewer_anim_set_btn_opa(void *obj, int32_t v)
-{
-    if (!obj) {
-        return;
-    }
-    lv_obj_set_style_opa((lv_obj_t *)obj, (lv_opa_t)v, LV_PART_MAIN);
 }
 
 static size_t input_cb(JDEC *jd, uint8_t *buff, size_t nbytes)
