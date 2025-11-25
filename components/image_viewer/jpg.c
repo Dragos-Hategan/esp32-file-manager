@@ -37,6 +37,7 @@ static esp_err_t jpg_handler_set_src(lv_obj_t *img, const char *path);
 
 static void jpg_viewer_destroy_active(jpg_viewer_ctx_t *ctx);
 static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx, const char *path);
+static void create_close_button(jpg_viewer_ctx_t *ctx);
 static void jpg_viewer_reset(jpg_viewer_ctx_t *ctx);
 static void jpg_viewer_on_close(lv_event_t *e);
 static void jpg_viewer_on_screen_tap(lv_event_t *e);
@@ -82,8 +83,9 @@ esp_err_t jpg_viewer_open(const jpg_viewer_open_opts_t *opts)
     ESP_LOGW("", "After jpg_handler_set_src");
 
     jpg_viewer_restore_close_opacity(ctx);
-
     lv_obj_center(ctx->image);
+    create_close_button(ctx);
+
     lv_screen_load(ctx->screen);
     bsp_display_unlock();
 
@@ -113,10 +115,16 @@ static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx, const char *path)
     ctx->screen = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(ctx->screen, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(ctx->screen, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_all(ctx->screen, 8, 0);
+    lv_obj_set_style_pad_all(ctx->screen, 0, 0);
     lv_obj_add_flag(ctx->screen, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(ctx->screen, jpg_viewer_on_screen_tap, LV_EVENT_CLICKED, ctx);
 
+    ctx->image = lv_image_create(ctx->screen);
+    lv_obj_center(ctx->image);
+}
+
+static void create_close_button(jpg_viewer_ctx_t *ctx)
+{
     lv_obj_t *close_btn = lv_button_create(ctx->screen);
     ctx->close_btn = close_btn;
     lv_obj_set_size(close_btn, 32, 32);
@@ -125,9 +133,6 @@ static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx, const char *path)
     lv_obj_center(close_lbl);
     lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
     lv_obj_add_event_cb(close_btn, jpg_viewer_on_close, LV_EVENT_CLICKED, ctx);
-
-    ctx->image = lv_image_create(ctx->screen);
-    lv_obj_center(ctx->image);
 }
 
 static esp_err_t jpg_handler_set_src(lv_obj_t *img, const char *path)
