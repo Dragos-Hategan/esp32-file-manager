@@ -219,7 +219,7 @@ static void jpg_viewer_set_close_opacity(jpg_viewer_ctx_t *ctx, lv_opa_t opa)
     lv_anim_init(&a);
     lv_anim_set_var(&a, ctx->close_btn);
     lv_anim_set_values(&a, lv_obj_get_style_opa(ctx->close_btn, LV_PART_MAIN), opa);
-    lv_anim_set_time(&a, 300);
+    lv_anim_set_time(&a, 250);
     lv_anim_set_path_cb(&a, lv_anim_path_linear);
     lv_anim_set_exec_cb(&a, jpg_viewer_anim_set_btn_opa);
     lv_anim_start(&a);
