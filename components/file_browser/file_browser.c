@@ -1807,6 +1807,7 @@ static esp_err_t file_browser_copy_dir(const char *src, const char *dest)
         }
         esp_err_t err = file_browser_copy_entry(child_src, child_dest);
         if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to copy entry: (%s)", esp_err_to_name(err));
             closedir(dir);
             file_browser_delete_path(dest);
             return err;
@@ -1988,6 +1989,8 @@ static esp_err_t file_browser_perform_paste(file_browser_ctx_t *ctx, const char 
     if (err == ESP_OK) {
         file_browser_clear_clipboard(ctx);
         file_browser_update_paste_button(ctx);
+    }else{
+        ESP_LOGE(TAG, "Failed to copy entry: (%s)", esp_err_to_name(err));
     }
     return err;
 }
@@ -2021,7 +2024,7 @@ static void file_browser_on_paste_click(lv_event_t *e)
         uint64_t total = 0;
         esp_err_t size_err = file_browser_compute_total_size(ctx->clipboard.src_path, &total);
         if (size_err != ESP_OK) {
-            file_browser_show_message("Failed to compute size.");
+            sdspi_schedule_sd_retry();
             return;
         }
         strlcpy(ctx->paste_target_path, dest_path, sizeof(ctx->paste_target_path));
@@ -2038,7 +2041,7 @@ static void file_browser_on_paste_click(lv_event_t *e)
     err = file_browser_perform_paste(ctx, dest_path, false);
     file_browser_hide_loading(ctx);
     if (err != ESP_OK) {
-        file_browser_show_message(esp_err_to_name(err));
+        ESP_LOGE(TAG, "Paste failed: (%s)", esp_err_to_name(err));
         sdspi_schedule_sd_retry();
         return;
     }
