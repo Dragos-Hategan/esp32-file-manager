@@ -70,6 +70,7 @@ typedef struct {
     lv_obj_t *action_mbox;
     lv_obj_t *confirm_mbox;
     lv_obj_t *paste_conflict_mbox;
+    lv_obj_t *copy_confirm_mbox;
     lv_obj_t *loading_dialog;
     lv_obj_t *rename_dialog;
     lv_obj_t *rename_textarea;
@@ -78,6 +79,8 @@ typedef struct {
     file_browser_clipboard_t clipboard;
     char paste_conflict_path[FS_NAV_MAX_PATH];
     char paste_conflict_name[FS_NAV_MAX_NAME];
+    char paste_target_path[FS_NAV_MAX_PATH];
+    bool paste_target_valid;
     bool suppress_click;
     bool pending_go_parent;
 } file_browser_ctx_t;
@@ -442,6 +445,7 @@ static void file_browser_on_folder_textarea_clicked(lv_event_t *e);
  *         ESP_FAIL on other filesystem/errno-based errors.
  */
  static esp_err_t file_browser_delete_path(const char *path);
+static esp_err_t file_browser_compute_total_size(const char *path, uint64_t *bytes);
 
 /**************************************************************************************************/
 
@@ -473,6 +477,13 @@ static void file_browser_close_paste_conflict(file_browser_ctx_t *ctx);
 static void file_browser_on_paste_conflict(lv_event_t *e);
 
 /**
+ * @brief Show/close copy confirmation prompt with total size.
+ */
+static void file_browser_show_copy_confirm(file_browser_ctx_t *ctx, uint64_t bytes);
+static void file_browser_close_copy_confirm(file_browser_ctx_t *ctx);
+static void file_browser_on_copy_confirm(lv_event_t *e);
+
+/**
  * @brief Show/hide a loading overlay during long copy/cut operations.
  */
 static void file_browser_show_loading(file_browser_ctx_t *ctx);
@@ -502,6 +513,7 @@ static bool file_browser_path_exists(const char *path);
 static esp_err_t file_browser_generate_copy_name(const char *directory, const char *name, char *out, size_t out_len);
 static void file_browser_clear_clipboard(file_browser_ctx_t *ctx);
 static void file_browser_show_message(const char *msg);
+static void file_browser_format_size64(uint64_t bytes, char *out, size_t out_len);
 
 /**************************************************************************************************/
 
@@ -956,6 +968,22 @@ static void file_browser_format_size(size_t bytes, char *out, size_t out_len)
     }
     if (idx == 0) {
         snprintf(out, out_len, "%u %s", (unsigned int)bytes, suffixes[idx]);
+    } else {
+        snprintf(out, out_len, "%.1f %s", value, suffixes[idx]);
+    }
+}
+
+static void file_browser_format_size64(uint64_t bytes, char *out, size_t out_len)
+{
+    static const char *suffixes[] = {"B", "KB", "MB", "GB", "TB"};
+    double value = (double)bytes;
+    size_t idx = 0;
+    while (value >= 1024.0 && idx < 4) {
+        value /= 1024.0;
+        idx++;
+    }
+    if (idx == 0) {
+        snprintf(out, out_len, "%llu %s", (unsigned long long)bytes, suffixes[idx]);
     } else {
         snprintf(out, out_len, "%.1f %s", value, suffixes[idx]);
     }
@@ -1602,6 +1630,47 @@ static esp_err_t file_browser_delete_path(const char *path)
     return ESP_OK;
 }
 
+static esp_err_t file_browser_compute_total_size(const char *path, uint64_t *bytes)
+{
+    if (!path || !bytes || path[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    struct stat st;
+    if (stat(path, &st) != 0) {
+        ESP_LOGE(TAG, "stat(%s) failed (errno=%d)", path, errno);
+        return ESP_FAIL;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        *bytes += (uint64_t)st.st_size;
+        return ESP_OK;
+    }
+
+    DIR *dir = opendir(path);
+    if (!dir) {
+        ESP_LOGE(TAG, "opendir(%s) failed (errno=%d)", path, errno);
+        return ESP_FAIL;
+    }
+    struct dirent *dent = NULL;
+    while ((dent = readdir(dir)) != NULL) {
+        if (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0) {
+            continue;
+        }
+        char child[FS_NAV_MAX_PATH];
+        int needed = snprintf(child, sizeof(child), "%s/%s", path, dent->d_name);
+        if (needed < 0 || needed >= (int)sizeof(child)) {
+            closedir(dir);
+            return ESP_ERR_INVALID_SIZE;
+        }
+        esp_err_t err = file_browser_compute_total_size(child, bytes);
+        if (err != ESP_OK) {
+            closedir(dir);
+            return err;
+        }
+    }
+    closedir(dir);
+    return ESP_OK;
+}
+
 static void file_browser_show_message(const char *msg)
 {
     if (!msg) {
@@ -1948,11 +2017,23 @@ static void file_browser_on_paste_click(lv_event_t *e)
         return;
     }
 
+    if (!ctx->clipboard.cut) {
+        uint64_t total = 0;
+        esp_err_t size_err = file_browser_compute_total_size(ctx->clipboard.src_path, &total);
+        if (size_err != ESP_OK) {
+            file_browser_show_message("Failed to compute size.");
+            return;
+        }
+        strlcpy(ctx->paste_target_path, dest_path, sizeof(ctx->paste_target_path));
+        ctx->paste_target_valid = true;
+        file_browser_show_copy_confirm(ctx, total);
+        return;
+    }
+
     if (file_browser_path_exists(dest_path)) {
         file_browser_show_paste_conflict(ctx, dest_path);
         return;
     }
-
     file_browser_show_loading(ctx);
     err = file_browser_perform_paste(ctx, dest_path, false);
     file_browser_hide_loading(ctx);
@@ -2025,6 +2106,85 @@ static void file_browser_on_paste_conflict(lv_event_t *e)
     }
     file_browser_hide_loading(ctx);
 
+    if (err != ESP_OK) {
+        file_browser_show_message(esp_err_to_name(err));
+        sdspi_schedule_sd_retry();
+        return;
+    }
+
+    err = file_browser_reload();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to refresh after paste: %s", esp_err_to_name(err));
+        sdspi_schedule_sd_retry();
+    }
+}
+
+static void file_browser_close_copy_confirm(file_browser_ctx_t *ctx)
+{
+    if (ctx && ctx->copy_confirm_mbox) {
+        lv_msgbox_close(ctx->copy_confirm_mbox);
+        ctx->copy_confirm_mbox = NULL;
+    }
+}
+
+static void file_browser_show_copy_confirm(file_browser_ctx_t *ctx, uint64_t bytes)
+{
+    if (!ctx || !ctx->clipboard.has_item || !ctx->paste_target_valid) {
+        return;
+    }
+    file_browser_close_copy_confirm(ctx);
+
+    char size_str[32];
+    file_browser_format_size64(bytes, size_str, sizeof(size_str));
+
+    lv_obj_t *mbox = lv_msgbox_create(NULL);
+    ctx->copy_confirm_mbox = mbox;
+    lv_obj_set_style_max_width(mbox, LV_PCT(80), 0);
+    lv_obj_center(mbox);
+
+    lv_obj_t *label = lv_label_create(mbox);
+    lv_label_set_text_fmt(label, "Copy %s?", size_str);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+
+    lv_obj_t *ok_btn = lv_msgbox_add_footer_button(mbox, "OK");
+    lv_obj_set_user_data(ok_btn, (void *)1);
+    lv_obj_add_event_cb(ok_btn, file_browser_on_copy_confirm, LV_EVENT_CLICKED, ctx);
+
+    lv_obj_t *cancel_btn = lv_msgbox_add_footer_button(mbox, "Cancel");
+    lv_obj_set_user_data(cancel_btn, (void *)0);
+    lv_obj_add_event_cb(cancel_btn, file_browser_on_copy_confirm, LV_EVENT_CLICKED, ctx);
+}
+
+static void file_browser_on_copy_confirm(lv_event_t *e)
+{
+    file_browser_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx) {
+        return;
+    }
+    bool confirm = (bool)(uintptr_t)lv_obj_get_user_data(lv_event_get_target(e));
+    file_browser_close_copy_confirm(ctx);
+
+    if (!confirm || !ctx->paste_target_valid) {
+        ctx->paste_target_valid = false;
+        ctx->paste_target_path[0] = '\0';
+        return;
+    }
+
+    char dest_path[FS_NAV_MAX_PATH];
+    strlcpy(dest_path, ctx->paste_target_path, sizeof(dest_path));
+    ctx->paste_target_valid = false;
+    ctx->paste_target_path[0] = '\0';
+
+    if (file_browser_path_exists(dest_path)) {
+        file_browser_show_paste_conflict(ctx, dest_path);
+        return;
+    }
+
+    file_browser_show_loading(ctx);
+    esp_err_t err = file_browser_perform_paste(ctx, dest_path, false);
+    file_browser_hide_loading(ctx);
     if (err != ESP_OK) {
         file_browser_show_message(esp_err_to_name(err));
         sdspi_schedule_sd_retry();
@@ -2363,12 +2523,15 @@ static void file_browser_clear_action_state(file_browser_ctx_t *ctx)
     }
     file_browser_close_action_menu(ctx);
     file_browser_close_delete_confirm(ctx);
+    file_browser_close_copy_confirm(ctx);
     file_browser_close_rename_dialog(ctx);
     ctx->action_entry.active = false;
     ctx->action_entry.is_dir = false;
     ctx->action_entry.is_txt = false;
     ctx->action_entry.name[0] = '\0';
     ctx->action_entry.directory[0] = '\0';
+    ctx->paste_target_valid = false;
+    ctx->paste_target_path[0] = '\0';
 }
 
 static void file_browser_set_rename_status(file_browser_ctx_t *ctx, const char *msg, bool error)
