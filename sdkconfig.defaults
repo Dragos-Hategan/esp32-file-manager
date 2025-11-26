@@ -59,7 +59,7 @@ CONFIG_BSP_DISPLAY_DRIVER_ILI9341=y
 # SPI pixel clock (MHz) [FPS CRITICAL]            
 CONFIG_BSP_DISPLAY_PIXEL_CLOCK=40    
 # Draw buffer height (lines) [FPS CRITICAL]             
-CONFIG_BSP_LCD_DRAW_BUF_HEIGHT=75  
+CONFIG_BSP_LCD_DRAW_BUF_HEIGHT=85  
 # Double buffering [FPS CRITICAL]               
 CONFIG_BSP_LCD_DRAW_BUF_DOUBLE=y                  
 
