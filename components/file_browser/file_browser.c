@@ -58,6 +58,7 @@ typedef enum {
 
 typedef struct {
     bool initialized;
+    bool rotated;
     fs_nav_t nav;
     lv_obj_t *screen;
     lv_obj_t *path_label;
@@ -333,13 +334,7 @@ static void file_browser_show_jpeg_unsupported_prompt(void);
  */
  static void file_browser_on_parent_click(lv_event_t *e);
 
-/**
- * @brief Sort-mode button handler: cycle sort mode and refresh list.
- *
- * Order cycles through Name → Date → Size (per @c FS_NAV_SORT_COUNT).
- *
- * @param e LVGL event (CLICKED) with user data = @c file_browser_ctx_t*.
- */
+static void file_browser_on_settings_click(lv_event_t *e);
 
 /**
  * @brief Tools dropdown handler (Sort / New TXT / New Folder).
@@ -423,17 +418,6 @@ static void file_browser_on_sort_apply(lv_event_t *e);
 static void file_browser_on_sort_cancel(lv_event_t *e);
 
 /**
- * @brief "New TXT" button handler: open an editor for a new text file.
- *
- * Uses the current navigator path as parent directory and opens the text editor
- * with a suggested default filename. On close, the browser is notified via
- * @c file_browser_editor_closed().
- *
- * @param e LVGL event (LV_EVENT_CLICKED) with user data = @c file_browser_ctx_t*.
- */
- static void file_browser_on_new_txt_click(lv_event_t *e);
-
-/**
  * @brief Callback invoked when the text editor/viewer screen is closed.
  *
  * If the content was changed, triggers a browser reload to reflect updates
@@ -472,13 +456,6 @@ static void file_browser_start_new_folder(file_browser_ctx_t *ctx);
 
 
 /************************************* Folder Creation Dialog *************************************/
-
-/**
- * @brief "New Folder" button handler: show the folder creation dialog.
- *
- * @param e LVGL event (LV_EVENT_CLICKED) with user data = @c file_browser_ctx_t*.
- */
- static void file_browser_on_new_folder_click(lv_event_t *e);
 
 /**
  * @brief Show the "Create folder" dialog overlay.
@@ -1039,6 +1016,7 @@ esp_err_t file_browser_start(void)
         return nav_err;
     }
     ctx->initialized = true;
+    ctx->rotated = false;
 
     if (!bsp_display_lock(0)) {
         fs_nav_deinit(&ctx->nav);
@@ -1079,6 +1057,7 @@ static void file_browser_build_screen(file_browser_ctx_t *ctx)
     lv_obj_set_style_pad_all(ctx->settings_btn, 6, 0);
     lv_obj_t *settings_lbl = lv_label_create(ctx->settings_btn);
     lv_label_set_text(settings_lbl, LV_SYMBOL_SETTINGS " Settings");
+    lv_obj_add_event_cb(ctx->settings_btn, file_browser_on_settings_click, LV_EVENT_CLICKED, ctx);
     lv_obj_set_style_text_align(settings_lbl, LV_TEXT_ALIGN_CENTER, 0);
 
     ctx->tools_dd = lv_dropdown_create(header);
@@ -1808,6 +1787,23 @@ static void file_browser_on_parent_click(lv_event_t *e)
     file_browser_hide_loading(ctx);
 }
 
+static void file_browser_on_settings_click(lv_event_t *e)
+{
+    file_browser_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx || !ctx->screen){
+        return;
+    }
+
+    lv_display_t *display = lv_display_get_default();
+    if (ctx->rotated){
+        lv_display_set_rotation(display, LV_DISPLAY_ROTATION_0);
+        ctx->rotated = false;
+    }else{
+        lv_display_set_rotation(display, LV_DISPLAY_ROTATION_180);
+        ctx->rotated = true;
+    }
+}
+
 static void file_browser_on_tools_changed(lv_event_t *e)
 {
     file_browser_ctx_t *ctx = lv_event_get_user_data(e);
@@ -2024,16 +2020,6 @@ static void file_browser_on_sort_cancel(lv_event_t *e)
     file_browser_update_sort_badges(ctx);
 }
 
-static void file_browser_on_new_txt_click(lv_event_t *e)
-{
-    file_browser_ctx_t *ctx = lv_event_get_user_data(e);
-    if (!ctx) {
-        return;
-    }
-
-    file_browser_start_new_txt(ctx);
-}
-
 static void file_browser_editor_closed(bool changed, void *user_ctx)
 {
     file_browser_ctx_t *ctx = (file_browser_ctx_t *)user_ctx;
@@ -2046,15 +2032,6 @@ static void file_browser_editor_closed(bool changed, void *user_ctx)
         ESP_LOGE(TAG, "Failed to reload after editor: %s", esp_err_to_name(err));
         sdspi_schedule_sd_retry();
     }
-}
-
-static void file_browser_on_new_folder_click(lv_event_t *e)
-{
-    file_browser_ctx_t *ctx = lv_event_get_user_data(e);
-    if (!ctx) {
-        return;
-    }
-    file_browser_start_new_folder(ctx);
 }
 
 static void file_browser_show_folder_dialog(file_browser_ctx_t *ctx)
