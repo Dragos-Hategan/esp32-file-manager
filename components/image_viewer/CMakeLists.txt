@@ -7,5 +7,4 @@ idf_component_register(
         esp_bsp_generic
         esp_common
         lvgl
-    PRIV_REQUIRES
 )

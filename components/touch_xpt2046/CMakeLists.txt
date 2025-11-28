@@ -9,7 +9,6 @@ idf_component_register(
     PRIV_REQUIRES
         esp_bsp_generic
         esp_driver_spi
-        file_browser
         nvs_flash
         freertos
 )

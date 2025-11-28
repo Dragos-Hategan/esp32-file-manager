@@ -1017,8 +1017,6 @@ esp_err_t file_browser_start(void)
     }
     ctx->initialized = true;
 
-    init_settings();
-
     if (!bsp_display_lock(0)) {
         fs_nav_deinit(&ctx->nav);
         ctx->initialized = false;
