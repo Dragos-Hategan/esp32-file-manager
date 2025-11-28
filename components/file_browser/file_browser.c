@@ -2724,6 +2724,7 @@ static void file_browser_on_paste_click(lv_event_t *e)
 
     char dest_path[FS_NAV_MAX_PATH];
     esp_err_t err = fs_nav_compose_path(&ctx->nav, ctx->clipboard.name, dest_path, sizeof(dest_path));
+
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to compose paste path: %s", esp_err_to_name(err));
         file_browser_show_message("Destination path too long.");
@@ -2779,36 +2780,45 @@ static void file_browser_on_paste_conflict(lv_event_t *e)
     if (!ctx) {
         return;
     }
+    char conflict_path[FS_NAV_MAX_PATH];
+    char conflict_name[FS_NAV_MAX_NAME];
+    strlcpy(conflict_path, ctx->paste_conflict_path, sizeof(conflict_path));
+    strlcpy(conflict_name, ctx->paste_conflict_name, sizeof(conflict_name));
     int action = (int)(uintptr_t)lv_obj_get_user_data(lv_event_get_target(e));
     file_browser_close_paste_conflict(ctx);
 
-    if (!ctx->clipboard.has_item || ctx->paste_conflict_path[0] == '\0') {
+    if (!ctx->clipboard.has_item || conflict_path[0] == '\0') {
         return;
     }
 
     esp_err_t err = ESP_OK;
     file_browser_show_loading(ctx);
     if (action == 1) {
-        err = file_browser_perform_paste(ctx, ctx->paste_conflict_path, true);
+        err = file_browser_perform_paste(ctx, conflict_path, true);
     } else if (action == 2) {
-        const char *last = strrchr(ctx->paste_conflict_path, '/');
-        if (!last || last == ctx->paste_conflict_path) {
+        const char *last = strrchr(conflict_path, '/');
+        if (!last) {
             file_browser_hide_loading(ctx);
             file_browser_show_message("Invalid destination path.");
             return;
         }
         char directory[FS_NAV_MAX_PATH];
-        size_t dir_len = (size_t)(last - ctx->paste_conflict_path);
-        if (dir_len >= sizeof(directory)) {
-            file_browser_hide_loading(ctx);
-            file_browser_show_message("Path too long.");
-            return;
+        if (last == conflict_path) {
+            /* Conflict path at root, treat directory as "/" */
+            strlcpy(directory, "/", sizeof(directory));
+        } else {
+            size_t dir_len = (size_t)(last - conflict_path);
+            if (dir_len >= sizeof(directory)) {
+                file_browser_hide_loading(ctx);
+                file_browser_show_message("Path too long.");
+                return;
+            }
+            memcpy(directory, conflict_path, dir_len);
+            directory[dir_len] = '\0';
         }
-        memcpy(directory, ctx->paste_conflict_path, dir_len);
-        directory[dir_len] = '\0';
 
         char new_name[FS_NAV_MAX_NAME];
-        err = file_browser_generate_copy_name(directory, ctx->paste_conflict_name, new_name, sizeof(new_name));
+        err = file_browser_generate_copy_name(directory, conflict_name, new_name, sizeof(new_name));
         if (err != ESP_OK) {
             file_browser_hide_loading(ctx);
             file_browser_show_message("Could not generate a new name.");
