@@ -5,6 +5,7 @@
 #include "bsp/esp-bsp.h"
 #include "Domine_14.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_log.h"
 #include "lvgl.h"
 
@@ -13,11 +14,15 @@
 #include "sd_card.h"
 
 typedef struct{
-    int incr_90_deg;
+    int screen_rotation_step;
 }settings_t;
 
 static settings_t s_settings;
 static const char *TAG = "settings";
+
+#define SETTINGS_NVS_NS       "settings"
+#define SETTINGS_NVS_ROT_KEY  "rotation_step"
+#define SETTINGS_ROTATION_STEPS 4
 
 /**
  * @brief Initialize the Non-Volatile Storage (NVS) flash partition.
@@ -54,6 +59,30 @@ static esp_err_t bsp_display_start_result(void);
 static void apply_default_font_theme(void);
 
 /**
+ * @brief Apply the current rotation step to the active LVGL display.
+ *
+ * Maps @ref s_settings.screen_rotation_step to an LVGL display rotation and sets it,
+ * clamping to a valid state if needed. Logs a warning when no display exists.
+ */
+static void apply_rotation_to_display(void);
+
+/**
+ * @brief Load persisted rotation step from NVS into @ref s_settings.
+ *
+ * Reads @ref SETTINGS_NVS_ROT_KEY from @ref SETTINGS_NVS_NS; keeps the
+ * default if the key or namespace is missing or out of range.
+ */
+static void load_rotation_from_nvs(void);
+
+/**
+ * @brief Persist current rotation step to NVS.
+ *
+ * Writes @ref s_settings.screen_rotation_step to @ref SETTINGS_NVS_ROT_KEY inside
+ * @ref SETTINGS_NVS_NS, logging warnings on failure but not aborting flow.
+ */
+static void persist_rotation_to_nvs(void);
+
+/**
  * @brief Initialize runtime settings defaults.
  */
 static void init_settings(void);
@@ -69,6 +98,7 @@ void starting_routine(void)
     ESP_ERROR_CHECK(bsp_display_start_result()); 
     ESP_ERROR_CHECK(bsp_display_backlight_on()); 
     apply_default_font_theme();
+    init_settings();
 
     /* ----- Init XPT2046 Touch Driver ----- */
     ESP_LOGI(TAG, "Initializing XPT2046 touch driver");
@@ -93,39 +123,13 @@ void starting_routine(void)
     if (err != ESP_OK){
         retry_init_sdspi();
     }
-
-    init_settings();
 }
 
 void settings_rotate_screen(void)
 {
-    lv_display_t *display = lv_display_get_default();
-    if (!display){
-        return;
-    }
-
-    switch(s_settings.incr_90_deg){
-        case 0:
-            lv_display_set_rotation(display, LV_DISPLAY_ROTATION_270);
-            s_settings.incr_90_deg = 1;
-            break;
-        case 1:
-            lv_display_set_rotation(display, LV_DISPLAY_ROTATION_180);
-            s_settings.incr_90_deg = 2;        
-            break;
-        case 2:
-            lv_display_set_rotation(display, LV_DISPLAY_ROTATION_90);
-            s_settings.incr_90_deg = 3;        
-            break;
-        case 3:
-            lv_display_set_rotation(display, LV_DISPLAY_ROTATION_0);
-            s_settings.incr_90_deg = 0;        
-            break; 
-        
-        default:
-            ESP_LOGE(TAG, "Wrong rotation setting");
-            break;
-    }
+    s_settings.screen_rotation_step = (s_settings.screen_rotation_step + 1) % SETTINGS_ROTATION_STEPS;
+    apply_rotation_to_display();
+    persist_rotation_to_nvs();
 }
 
 static esp_err_t init_nvs(void)
@@ -179,7 +183,69 @@ static void apply_default_font_theme(void)
     lv_obj_set_style_text_font(sys_layer, &Domine_14, 0);
 }
 
+static void apply_rotation_to_display(void)
+{
+    lv_display_t *display = lv_display_get_default();
+    if (!display) {
+        ESP_LOGW(TAG, "No display available; skip applying rotation");
+        return;
+    }
+
+    /* Map state index to rotation (0:270, 1:180, 2:90, 3:0). */
+    switch (s_settings.screen_rotation_step % SETTINGS_ROTATION_STEPS) {
+        case 0: lv_display_set_rotation(display, LV_DISPLAY_ROTATION_270); break;
+        case 1: lv_display_set_rotation(display, LV_DISPLAY_ROTATION_180); break;
+        case 2: lv_display_set_rotation(display, LV_DISPLAY_ROTATION_90);  break;
+        case 3: lv_display_set_rotation(display, LV_DISPLAY_ROTATION_0);   break;
+        default:
+            s_settings.screen_rotation_step = SETTINGS_ROTATION_STEPS - 1;
+            lv_display_set_rotation(display, LV_DISPLAY_ROTATION_0);
+            break;
+    }
+}
+
+static void load_rotation_from_nvs(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(SETTINGS_NVS_NS, NVS_READONLY, &h);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to open NVS for rotation: %s", esp_err_to_name(err));
+        return;
+    }
+
+    int32_t stored = s_settings.screen_rotation_step;
+    err = nvs_get_i32(h, SETTINGS_NVS_ROT_KEY, &stored);
+    nvs_close(h);
+
+    if (err == ESP_OK && stored >= 0 && stored < SETTINGS_ROTATION_STEPS) {
+        s_settings.screen_rotation_step = (int)stored;
+    }
+}
+
+static void persist_rotation_to_nvs(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(SETTINGS_NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to open NVS for rotation: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = nvs_set_i32(h, SETTINGS_NVS_ROT_KEY, s_settings.screen_rotation_step);
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to save rotation to NVS: %s", esp_err_to_name(err));
+    }
+}
+
 static void init_settings(void)
 {
-    s_settings.incr_90_deg = 0;
+    /* Default state corresponds to 0-degree rotation (state 3 in our sequence). */
+    s_settings.screen_rotation_step = SETTINGS_ROTATION_STEPS - 1;
+    load_rotation_from_nvs();
+    apply_rotation_to_display();
 }
