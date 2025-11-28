@@ -1109,12 +1109,12 @@ static void file_browser_build_screen(file_browser_ctx_t *ctx)
     lv_label_set_text(ctx->path_label, "/");
 
     ctx->parent_btn = lv_button_create(scr);
-    lv_obj_set_size(ctx->parent_btn, LV_PCT(50), LV_SIZE_CONTENT);
+    lv_obj_set_size(ctx->parent_btn, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_radius(ctx->parent_btn, 6, 0);
     lv_obj_set_style_pad_all(ctx->parent_btn, 5, 0);
     lv_obj_add_event_cb(ctx->parent_btn, file_browser_on_parent_click, LV_EVENT_CLICKED, ctx);
     lv_obj_t *parent_lbl = lv_label_create(ctx->parent_btn);
-    lv_label_set_text(parent_lbl, LV_SYMBOL_UP " ../ <- Parent Folder");
+    lv_label_set_text(parent_lbl, LV_SYMBOL_UP " Parent Folder");
     lv_obj_set_style_text_align(parent_lbl, LV_TEXT_ALIGN_LEFT, 0);
     lv_obj_add_flag(ctx->parent_btn, LV_OBJ_FLAG_HIDDEN);
 

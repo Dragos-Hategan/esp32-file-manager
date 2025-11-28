@@ -5,9 +5,9 @@
 #include "bsp/esp-bsp.h"
 #include "Domine_14.h"
 #include "nvs_flash.h"
-#include "nvs.h"
 #include "esp_log.h"
 #include "lvgl.h"
+#include "nvs.h"
 
 #include "calibration_xpt2046.h"
 #include "touch_xpt2046.h"
