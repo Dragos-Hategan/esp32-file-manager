@@ -25,9 +25,7 @@ typedef struct{
     lv_obj_t *return_screen;            /**< Screen to return to on close */
     lv_obj_t *screen;                   /**< Root LVGL screen object */
     lv_obj_t *toolbar;                  /**< Toolbar container */
-
-
-    settings_t settings;
+    settings_t settings;                /**< Information about the current session */
 }settings_ctx_t;
 
 static settings_t s_settings;
@@ -35,8 +33,8 @@ static settings_ctx_t s_settings_ctx;
 static const char *TAG = "settings";
 
 static void settings_build_screen(settings_ctx_t *ctx);
-
 static void settings_on_about(lv_event_t *e);
+static void settings_on_about_close(lv_event_t *e);
 
 /**
  * @brief Back button handler for the settings screen.
@@ -175,11 +173,11 @@ esp_err_t settings_open_settings(lv_obj_t *return_screen)
 {
     settings_ctx_t *ctx = &s_settings_ctx;
     if (!ctx->screen){
-        ctx->return_screen = return_screen;
         settings_build_screen(ctx);
     }
 
     ctx->active = true;
+    ctx->return_screen = return_screen;
     lv_screen_load(ctx->screen);
 
     return ESP_OK;
@@ -234,6 +232,75 @@ static void settings_on_about(lv_event_t *e)
     if (!ctx)
     {
         return;
+    }
+
+    lv_obj_t *overlay = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(overlay);
+    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_30, 0);
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
+
+    lv_obj_t *dlg = lv_obj_create(overlay);
+    lv_obj_set_style_radius(dlg, 12, 0);
+    lv_obj_set_style_pad_all(dlg, 16, 0);
+    lv_obj_set_style_bg_color(dlg, lv_color_hex(0x202126), 0);
+    lv_obj_set_style_bg_opa(dlg, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(dlg, 2, 0);
+    lv_obj_set_style_border_color(dlg, lv_color_hex(0x3a3d45), 0);
+    lv_obj_set_width(dlg, LV_PCT(80));
+    lv_obj_set_height(dlg, LV_PCT(90));
+    lv_obj_set_flex_flow(dlg, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(dlg, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_center(dlg);
+
+    lv_obj_t *list = lv_obj_create(dlg);
+    lv_obj_remove_style_all(list);
+    lv_obj_set_style_pad_all(list, 0, 0);
+    lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
+    lv_obj_set_width(list, LV_PCT(100));
+    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_grow(list, 1);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_pad_row(list, 10, 0);
+
+    const char *lines[] = {
+        "Setting 1: this is a mediummedium text about setting 1",
+        "Setting 2: this is a short text about setting 2",
+        "Setting 3: this is a mediummedium text about setting 3",
+        "Setting 4: this is a short text about setting 4",
+        "Setting 5: this is a LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOONG text about setting 5",
+        "Setting 6: this is a mediummedium text about setting 6",
+        "Setting 7: this is a LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOONG text about setting 7",
+        "Setting 8: this is a LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOONG text about setting 8",        
+    };
+
+    for (size_t i = 0; i < sizeof(lines)/sizeof(lines[0]); i++) {
+        lv_obj_t *lbl = lv_label_create(list);
+        lv_label_set_text(lbl, lines[i]);
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(lbl, LV_PCT(100));
+        lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(lbl, lv_color_hex(0xe0e0e0), 0);
+    }
+
+    lv_obj_t *ok_btn = lv_button_create(dlg);
+    lv_obj_set_width(ok_btn, LV_PCT(100));
+    lv_obj_set_style_radius(ok_btn, 8, 0);
+    lv_obj_set_style_pad_all(ok_btn, 8, 0);
+    lv_obj_t *ok_lbl = lv_label_create(ok_btn);
+    lv_label_set_text(ok_lbl, "OK");
+    lv_obj_center(ok_lbl);
+
+    lv_obj_add_event_cb(ok_btn, settings_on_about_close, LV_EVENT_CLICKED, overlay);
+}
+
+static void settings_on_about_close(lv_event_t *e)
+{
+    lv_obj_t *overlay = lv_event_get_user_data(e);
+    if (overlay) {
+        lv_obj_del(overlay);
     }
 }
 
