@@ -316,27 +316,7 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_obj_set_style_pad_bottom(settings_list, 12, 0);
     lv_obj_set_style_pad_left(settings_list, 12, 0);
     lv_obj_set_style_pad_right(settings_list, 12, 0);
-    lv_obj_set_style_pad_row(settings_list, 10, 0);
-
-    lv_obj_t *rotate_button = lv_button_create(settings_list);
-    lv_obj_set_width(rotate_button, LV_PCT(100));
-    lv_obj_set_style_radius(rotate_button, 8, 0);
-    lv_obj_set_style_pad_all(rotate_button, 10, 0);    
-    lv_obj_add_event_cb(rotate_button, settings_rotate_screen, LV_EVENT_CLICKED, ctx);
-    lv_obj_set_style_align(rotate_button, LV_ALIGN_CENTER, 0);
-    lv_obj_t *rotate_lbl = lv_label_create(rotate_button);
-    lv_label_set_text(rotate_lbl, "Rotate Screen");
-    lv_obj_center(rotate_lbl);    
-
-    lv_obj_t *restart_button = lv_button_create(settings_list);
-    lv_obj_set_width(restart_button, LV_PCT(100));
-    lv_obj_set_style_radius(restart_button, 8, 0);
-    lv_obj_set_style_pad_all(restart_button, 10, 0);    
-    lv_obj_add_event_cb(restart_button, settings_restart, LV_EVENT_CLICKED, ctx);
-    lv_obj_set_style_align(restart_button, LV_ALIGN_CENTER, 0);
-    lv_obj_t *restart_lbl = lv_label_create(restart_button);
-    lv_label_set_text(restart_lbl, "Restart");
-    lv_obj_center(restart_lbl);
+    lv_obj_set_style_pad_row(settings_list, 10, 0);  
 
     lv_obj_t *brightness_card = lv_button_create(settings_list);
     lv_obj_set_width(brightness_card, LV_PCT(100));
@@ -371,6 +351,26 @@ static void settings_build_screen(settings_ctx_t *ctx)
     char init_txt[32];
     lv_snprintf(init_txt, sizeof(init_txt), "Brightness: %d%%", init_val);
     lv_label_set_text(ctx->brightness_label, init_txt);
+
+    lv_obj_t *rotate_button = lv_button_create(settings_list);
+    lv_obj_set_width(rotate_button, LV_PCT(100));
+    lv_obj_set_style_radius(rotate_button, 8, 0);
+    lv_obj_set_style_pad_all(rotate_button, 10, 0);    
+    lv_obj_add_event_cb(rotate_button, settings_rotate_screen, LV_EVENT_CLICKED, ctx);
+    lv_obj_set_style_align(rotate_button, LV_ALIGN_CENTER, 0);
+    lv_obj_t *rotate_lbl = lv_label_create(rotate_button);
+    lv_label_set_text(rotate_lbl, "Rotate Screen");
+    lv_obj_center(rotate_lbl);  
+
+    lv_obj_t *restart_button = lv_button_create(settings_list);
+    lv_obj_set_width(restart_button, LV_PCT(100));
+    lv_obj_set_style_radius(restart_button, 8, 0);
+    lv_obj_set_style_pad_all(restart_button, 10, 0);    
+    lv_obj_add_event_cb(restart_button, settings_restart, LV_EVENT_CLICKED, ctx);
+    lv_obj_set_style_align(restart_button, LV_ALIGN_CENTER, 0);
+    lv_obj_t *restart_lbl = lv_label_create(restart_button);
+    lv_label_set_text(restart_lbl, "Restart");
+    lv_obj_center(restart_lbl);
 }
 
 static void settings_on_about(lv_event_t *e)
@@ -413,14 +413,9 @@ static void settings_on_about(lv_event_t *e)
     lv_obj_set_style_pad_row(list, 10, 0);
 
     const char *lines[] = {
-        "Setting 1: this is a mediummedium text about setting 1",
-        "Setting 2: this is a short text about setting 2",
-        "Setting 3: this is a mediummedium text about setting 3",
-        "Setting 4: this is a short text about setting 4",
-        "Setting 5: this is a LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOONG text about setting 5",
-        "Setting 6: this is a mediummedium text about setting 6",
-        "Setting 7: this is a LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOONG text about setting 7",
-        "Setting 8: this is a LOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOONG text about setting 8",        
+        "Brightness: adjusts backlight between 10%% and 100%%.",
+        "Rotate Screen: rotates the display 90 degrees each time.",
+        "Restart: reboots the device after saving system changes. Note: settings are also saved by simply leaving settings.",
     };
 
     for (size_t i = 0; i < sizeof(lines)/sizeof(lines[0]); i++) {
