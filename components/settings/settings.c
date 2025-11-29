@@ -18,6 +18,8 @@
 #define SETTINGS_ROTATION_STEPS          4
 
 #define SETTINGS_MINIMUM_BRIGHTNESS 10   /**< Lowest brightness percent to avoid black screen */
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
 
 typedef struct{
     int screen_rotation_step;   /**< Current rotation step (0-3) applied to display */
@@ -413,7 +415,7 @@ static void settings_on_about(lv_event_t *e)
     lv_obj_set_style_pad_row(list, 10, 0);
 
     const char *lines[] = {
-        "Brightness: adjusts backlight between 10%% and 100%%.",
+        "Brightness: adjusts backlight between " STR(SETTINGS_MINIMUM_BRIGHTNESS) "\% and 100\%.",
         "Rotate Screen: rotates the display 90 degrees each time.",
         "Restart: reboots the device after saving system changes. Note: settings are also saved by simply leaving settings.",
     };
@@ -625,7 +627,7 @@ static void load_brightness_from_nvs(void)
     err = nvs_get_i32(h, SETTINGS_NVS_BRIGHTNESS_KEY, &stored);
     nvs_close(h);
 
-    if (err == ESP_OK && stored >= 0 && stored <= 100) {
+    if (err == ESP_OK && stored >= SETTINGS_MINIMUM_BRIGHTNESS && stored <= 100) {
         s_settings.brightness = (int)stored;
         s_settings.saved_brightness = s_settings.brightness;
     } else {
@@ -689,7 +691,7 @@ static void settings_on_brightness_changed(lv_event_t *e)
     }
 
     int val = lv_slider_get_value(ctx->brightness_slider);
-    if (val < 0) val = 0;
+    if (val < SETTINGS_MINIMUM_BRIGHTNESS) val = SETTINGS_MINIMUM_BRIGHTNESS;
     if (val > 100) val = 100;
     s_settings.brightness = val;
     char txt[32];
