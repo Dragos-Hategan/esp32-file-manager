@@ -1321,12 +1321,6 @@ static bool check_second_header(file_browser_ctx_t *ctx)
     return true;
 }
 
-/**
- * @brief Refresh visibility/state of the second header (parent + paste/cancel).
- *
- * Updates parent/paste/cancel controls and hides the row when neither parent
- * navigation nor paste actions are available.
- */
 static void file_browser_update_second_header(file_browser_ctx_t *ctx)
 {
     if (!check_second_header(ctx)){

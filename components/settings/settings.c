@@ -15,12 +15,15 @@
 #define SETTINGS_NVS_NS                 "settings"
 #define SETTINGS_NVS_ROT_KEY            "rotation_step"
 #define SETTINGS_NVS_BRIGHTNESS_KEY     "brightness_pct"
-#define SETTINGS_ROTATION_STEPS         4
+#define SETTINGS_ROTATION_STEPS          4
+
+#define SETTINGS_MINIMUM_BRIGHTNESS 10   /**< Lowest brightness percent to avoid black screen */
 
 typedef struct{
-    int screen_rotation_step;
-    int brightness;
-    int saved_brightness;
+    int screen_rotation_step;   /**< Current rotation step (0-3) applied to display */
+    int saved_rotation_step;    /**< Last persisted rotation step */
+    int brightness;             /**< Current brightness percentage */
+    int saved_brightness;       /**< Last persisted brightness percentage */
 }settings_t;
 
 typedef struct{
@@ -30,7 +33,7 @@ typedef struct{
     lv_obj_t *toolbar;                  /**< Toolbar container */
     lv_obj_t *brightness_label;         /**< Label showing current brightness percent */
     lv_obj_t *brightness_slider;        /**< Slider to pick brightness percent */
-    lv_obj_t * restart_confirm_mbox;    /**<  */
+    lv_obj_t * restart_confirm_mbox;    /**< Active restart confirmation dialog (NULL when closed) */
     settings_t settings;                /**< Information about the current session */
 }settings_ctx_t;
 
@@ -68,6 +71,8 @@ static void settings_on_about_close(lv_event_t *e);
 /**
  * @brief Update brightness level when the slider value changes.
  *
+ * Refreshes the brightness label and drives the backlight to the new level.
+ *
  * @param e LVGL event (VALUE_CHANGED) with user data = settings_ctx_t*.
  */
 static void settings_on_brightness_changed(lv_event_t *e);
@@ -84,7 +89,8 @@ static void settings_on_back(lv_event_t *e);
 /**
  * @brief Close the settings screen and restore the previous screen.
  *
- * Marks the context inactive and loads @ref settings_ctx_t::return_screen if set.
+ * Persists brightness/rotation changes to NVS when needed, marks the context inactive,
+ * and loads @ref settings_ctx_t::return_screen if set.
  *
  * @param ctx Active settings context.
  */
@@ -100,14 +106,18 @@ static void settings_restart(lv_event_t *e);
 /**
  * @brief Handler for confirming restart from the overlay.
  *
- * @param e LVGL event (CLICKED) with user data = overlay obj.
+ * Persists pending brightness/rotation changes and then triggers a restart.
+ *
+ * @param e LVGL event (CLICKED) with user data = settings_ctx_t*.
  */
 static void settings_restart_confirm(lv_event_t *e);
 
 /**
  * @brief Close the restart overlay without restarting.
  *
- * @param e LVGL event (CLICKED) with user data = overlay obj.
+ * Dismisses the confirmation dialog and clears the stored pointer.
+ *
+ * @param e LVGL event (CLICKED) with user data = settings_ctx_t*.
  */
 static void settings_close_restart(lv_event_t *e);
 
@@ -187,6 +197,9 @@ static void persist_brightness_to_nvs(void);
 
 /**
  * @brief Initialize runtime settings defaults.
+ *
+ * Seeds defaults, loads persisted brightness/rotation, applies backlight level,
+ * and updates the LVGL display rotation.
  */
 static void init_settings(void);
 
@@ -237,6 +250,10 @@ void starting_routine(void)
 
 esp_err_t settings_open_settings(lv_obj_t *return_screen)
 {
+    if (!return_screen){
+        return ESP_ERR_INVALID_ARG;
+    }
+
     settings_ctx_t *ctx = &s_settings_ctx;
     if (!ctx->screen){
         settings_build_screen(ctx);
@@ -328,6 +345,10 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_obj_set_style_pad_row(brightness_card, 6, 0);
     lv_obj_set_style_radius(brightness_card, 8, 0);
     lv_obj_set_flex_flow(brightness_card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(brightness_card,
+                          LV_FLEX_ALIGN_START,   /* keep vertical stacking */
+                          LV_FLEX_ALIGN_CENTER,  /* center horizontally */
+                          LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_align(brightness_card, LV_ALIGN_CENTER, 0);
     lv_obj_clear_flag(brightness_card, LV_OBJ_FLAG_CLICKABLE); /* container only */
 
@@ -337,8 +358,8 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_obj_set_style_text_color(ctx->brightness_label, lv_color_hex(0xe0e0e0), 0);
 
     ctx->brightness_slider = lv_slider_create(brightness_card);
-    lv_obj_set_width(ctx->brightness_slider, LV_PCT(100));
-    lv_slider_set_range(ctx->brightness_slider, 0, 100);
+    lv_obj_set_width(ctx->brightness_slider, LV_PCT(90));
+    lv_slider_set_range(ctx->brightness_slider, SETTINGS_MINIMUM_BRIGHTNESS, 100);
     lv_slider_set_value(ctx->brightness_slider, s_settings.brightness, LV_ANIM_OFF);
     lv_obj_add_event_cb(ctx->brightness_slider, settings_on_brightness_changed, LV_EVENT_VALUE_CHANGED, ctx);
     lv_obj_set_style_bg_color(ctx->brightness_slider, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
@@ -444,7 +465,7 @@ static void settings_close(settings_ctx_t *ctx)
 {
     if (ctx && ctx->brightness_slider) {
         int val = lv_slider_get_value(ctx->brightness_slider);
-        if (val < 0) val = 0;
+        if (val < SETTINGS_MINIMUM_BRIGHTNESS) val = SETTINGS_MINIMUM_BRIGHTNESS;
         if (val > 100) val = 100;
         s_settings.brightness = val;
         if (s_settings.brightness != s_settings.saved_brightness) {
@@ -452,7 +473,9 @@ static void settings_close(settings_ctx_t *ctx)
         }
     }
 
-    persist_rotation_to_nvs();
+    if (s_settings.screen_rotation_step != s_settings.saved_rotation_step) {
+        persist_rotation_to_nvs();
+    }
 
     ctx->active = false;
     if (ctx->return_screen)
@@ -567,6 +590,7 @@ static void load_rotation_from_nvs(void)
 
     if (err == ESP_OK && stored >= 0 && stored < SETTINGS_ROTATION_STEPS) {
         s_settings.screen_rotation_step = (int)stored;
+        s_settings.saved_rotation_step = s_settings.screen_rotation_step;
     }
 }
 
@@ -587,6 +611,8 @@ static void persist_rotation_to_nvs(void)
 
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to save rotation to NVS: %s", esp_err_to_name(err));
+    } else {
+        s_settings.saved_rotation_step = s_settings.screen_rotation_step;
     }
 }
 
@@ -639,6 +665,7 @@ static void init_settings(void)
 {
     /* Default state corresponds to 0-degree rotation (state 3 in our sequence). */
     s_settings.screen_rotation_step = SETTINGS_ROTATION_STEPS - 1;
+    s_settings.saved_rotation_step = s_settings.screen_rotation_step;
     s_settings.brightness = 100;
     s_settings.saved_brightness = 100;
     load_brightness_from_nvs();
@@ -707,8 +734,19 @@ static void settings_restart(lv_event_t *e)
 
 static void settings_restart_confirm(lv_event_t *e)
 {
-    persist_brightness_to_nvs();
-    persist_rotation_to_nvs();
+    settings_ctx_t *ctx = lv_event_get_user_data(e);
+    if (ctx && ctx->brightness_slider) {
+        int val = lv_slider_get_value(ctx->brightness_slider);
+        if (val < SETTINGS_MINIMUM_BRIGHTNESS) val = SETTINGS_MINIMUM_BRIGHTNESS;
+        if (val > 100) val = 100;
+        s_settings.brightness = val;
+        if (s_settings.brightness != s_settings.saved_brightness) {
+            persist_brightness_to_nvs();
+        }
+    }
+    if (s_settings.screen_rotation_step != s_settings.saved_rotation_step) {
+        persist_rotation_to_nvs();
+    }
     esp_restart();
 }
 

@@ -18,6 +18,12 @@ extern "C" {
  */
 void starting_routine(void);
 
+/**
+ * @brief Open the Settings UI, creating it on first call and loading it into LVGL.
+ *
+ * @param return_screen Screen to switch back to when closing settings (nullable).
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG on bad return screen
+ */
 esp_err_t settings_open_settings(lv_obj_t *return_screen);
 
 #ifdef __cplusplus
