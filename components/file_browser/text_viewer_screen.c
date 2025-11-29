@@ -615,8 +615,8 @@ static void text_viewer_build_screen(text_viewer_ctx_t *ctx)
 {
     lv_obj_t *scr = lv_obj_create(NULL);
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_pad_all(scr, 6, 0);
-    lv_obj_set_style_pad_gap(scr, 6, 0);
+    lv_obj_set_style_pad_all(scr, 2, 0);
+    lv_obj_set_style_pad_gap(scr, 5, 0);
     lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
     lv_obj_add_flag(scr, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(scr, text_viewer_on_screen_clicked, LV_EVENT_CLICKED, ctx);
@@ -626,16 +626,21 @@ static void text_viewer_build_screen(text_viewer_ctx_t *ctx)
     lv_obj_remove_style_all(toolbar);
     lv_obj_set_size(toolbar, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(toolbar, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_gap(toolbar, 8, 0);
+    lv_obj_set_style_pad_gap(toolbar, 3, 0);
+    lv_obj_set_flex_align(toolbar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     ctx->toolbar = toolbar;
 
     lv_obj_t *back_btn = lv_button_create(toolbar);
+    lv_obj_set_style_radius(back_btn, 6, 0);
+    lv_obj_set_style_pad_all(back_btn, 6, 0);    
     lv_obj_add_event_cb(back_btn, text_viewer_on_back, LV_EVENT_CLICKED, ctx);
     lv_obj_t *back_lbl = lv_label_create(back_btn);
     lv_label_set_text(back_lbl, LV_SYMBOL_LEFT " Back");
     lv_obj_center(back_lbl);
 
     ctx->save_btn = lv_button_create(toolbar);
+    lv_obj_set_style_radius(ctx->save_btn, 6, 0);
+    lv_obj_set_style_pad_all(ctx->save_btn, 6, 0);        
     lv_obj_add_event_cb(ctx->save_btn, text_viewer_on_save, LV_EVENT_CLICKED, ctx);
     lv_obj_t *save_lbl = lv_label_create(ctx->save_btn);
     lv_label_set_text(save_lbl, LV_SYMBOL_SAVE " Save");
