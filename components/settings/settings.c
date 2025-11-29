@@ -35,7 +35,23 @@ static settings_ctx_t s_settings_ctx;
 static const char *TAG = "settings";
 
 static void settings_build_screen(settings_ctx_t *ctx);
+
+/**
+ * @brief Back button handler for the settings screen.
+ *
+ * Retrieves the settings context from event user data and closes the settings UI.
+ *
+ * @param e LVGL event (CLICKED) with user data = settings_ctx_t*.
+ */
 static void settings_on_back(lv_event_t *e);
+
+/**
+ * @brief Close the settings screen and restore the previous screen.
+ *
+ * Marks the context inactive and loads @ref settings_ctx_t::return_screen if set.
+ *
+ * @param ctx Active settings context.
+ */
 static void settings_close(settings_ctx_t *ctx);
 
 /**
@@ -103,6 +119,8 @@ static void init_settings(void);
 
 /**
  * @brief Rotate the display in 90-degree increments (0 -> 90 -> 180 -> 270 -> 0).
+ * 
+ * @param e LVGL event (CLICKED) with user data = settings_ctx_t*.
  */
 static void settings_rotate_screen(lv_event_t *e);
 
@@ -166,7 +184,6 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_obj_set_style_pad_gap(scr, 5, 0);
     lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
     lv_obj_add_flag(scr, LV_OBJ_FLAG_CLICKABLE);
-    //lv_obj_add_event_cb(scr, settings_on_screen_clicked, LV_EVENT_CLICKED, ctx);
     ctx->screen = scr;
 
     lv_obj_t *toolbar = lv_obj_create(scr);
