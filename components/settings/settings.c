@@ -160,7 +160,24 @@ static void settings_reset_confirm(lv_event_t *e);
  */
 static void settings_close_reset(lv_event_t *e);
 
+/**
+ * @brief Launch touch calibration from Settings (async).
+ *
+ * Cleans the current settings screen, marks the context inactive, and spawns a
+ * FreeRTOS task to run the calibration flow without blocking the LVGL handler.
+ *
+ * @param e LVGL event (CLICKED) with user data = settings_ctx_t*.
+ */
 static void settings_run_calibration(lv_event_t *e);
+
+/**
+ * @brief Background task to run touch calibration and restore UI state.
+ *
+ * Temporarily forces default rotation for calibration, runs @ref calibration_test,
+ * restores the previous rotation, and reopens the settings screen.
+ *
+ * @param param settings_ctx_t* passed from @ref settings_run_calibration.
+ */
 static void settings_calibration_task(void *param);
 
 /**
@@ -913,8 +930,11 @@ static void settings_calibration_task(void *param)
     settings_ctx_t *ctx = (settings_ctx_t *)param;
 
     if (!ctx || !ctx->return_screen){
+        vTaskDelete(NULL);
         return;
     }
+
+    int prev_rotation = ctx->settings.screen_rotation_step;
     
     if (ctx->settings.screen_rotation_step != SETTINGS_DEFAULT_ROTATION_STEP && ctx->settings.screen_rotation_step != SETTINGS_DEFAULT_ROTATION_STEP - 2){
         ctx->settings.screen_rotation_step = SETTINGS_DEFAULT_ROTATION_STEP;
@@ -923,7 +943,7 @@ static void settings_calibration_task(void *param)
 
     calibration_test(true);
 
-    ctx->settings.screen_rotation_step = ctx->settings.saved_rotation_step;
+    ctx->settings.screen_rotation_step = prev_rotation;
     apply_rotation_to_display(true);
     
     bsp_display_lock(0);
