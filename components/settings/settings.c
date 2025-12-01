@@ -2,6 +2,8 @@
 
 #include <stddef.h>
 #include <stdlib.h>
+#include <time.h>
+#include <sys/time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -397,6 +399,16 @@ static void settings_hide_dt_keyboard(settings_ctx_t *ctx);
  * @return true if obj is a descendant (or same) as maybe_ancestor; false otherwise.
  */
 static bool settings_is_descendant(lv_obj_t *obj, lv_obj_t *maybe_ancestor);
+
+/**
+ * @brief Validate a date considering leap years and month lengths.
+ *
+ * @param year_full Full year (e.g., 2025).
+ * @param month     Month 1-12.
+ * @param day       Day (1..n based on month and leap year).
+ * @return true if the date is valid, false otherwise.
+ */
+static bool settings_is_valid_date(int year_full, int month, int day);
 
 void starting_routine(void)
 {
@@ -1155,11 +1167,35 @@ static void settings_apply_date_time(lv_event_t *e)
         return;
     }
 
+    int year_full = 2000 + year;
+    if (!settings_is_valid_date(year_full, month, day)) {
+        settings_show_invalid_input();
+        return;
+    }
+
     ctx->settings.dt_month = month;
     ctx->settings.dt_day = day;
     ctx->settings.dt_year = year;
     ctx->settings.dt_hour = hour;
     ctx->settings.dt_minute = minute;
+
+    /* Set system time from the provided fields (no persistence). */
+    struct tm tm_set = {
+        .tm_year = year_full - 1900, /* YY -> 20YY */
+        .tm_mon = month - 1,
+        .tm_mday = day,
+        .tm_hour = hour,
+        .tm_min = minute,
+        .tm_sec = 0,
+    };
+    time_t t = mktime(&tm_set);
+    if (t != (time_t)-1) {
+        struct timeval tv = {
+            .tv_sec = t,
+            .tv_usec = 0,
+        };
+        settimeofday(&tv, NULL);
+    }
 
     if (ctx->datetime_overlay) {
         lv_obj_del(ctx->datetime_overlay);
@@ -1323,6 +1359,21 @@ static bool settings_is_descendant(lv_obj_t *obj, lv_obj_t *maybe_ancestor)
         cur = lv_obj_get_parent(cur);
     }
     return false;
+}
+
+static bool settings_is_valid_date(int year_full, int month, int day)
+{
+    if (month < 1 || month > 12 || day < 1) {
+        return false;
+    }
+
+    int days_in_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    bool leap = ((year_full % 4 == 0) && (year_full % 100 != 0)) || (year_full % 400 == 0);
+    if (leap) {
+        days_in_month[1] = 29;
+    }
+
+    return day <= days_in_month[month - 1];
 }
 
 static void settings_on_brightness_changed(lv_event_t *e)

@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "bsp/esp-bsp.h"
 #include "freertos/FreeRTOS.h"
@@ -16,6 +17,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
+#include "esp_timer.h"
 
 #include "settings.h"
 #include "fs_navigator.h"
@@ -66,6 +68,8 @@ typedef struct {
     lv_obj_t *tools_dd;
     lv_obj_t *datetime_btn;
     lv_obj_t *datetime_label;
+    esp_timer_handle_t clock_timer;
+    bool clock_timer_running;
     lv_obj_t *sort_panel;
     lv_obj_t *sort_criteria_dd;
     lv_obj_t *sort_direction_dd;
@@ -161,7 +165,42 @@ static void file_browser_wait_for_reconnection_task(void* arg);
  * @internal UI construction only; does not query filesystem.
  */
 static void file_browser_build_screen(file_browser_ctx_t *ctx);
+/**
+ * @brief Click handler for the header "Set Date/Time" button.
+ *
+ * Delegates to the shared settings dialog to pick a date/time.
+ *
+ * @param e LVGL event (CLICKED) with user data = file_browser_ctx_t*.
+ */
 static void file_browser_on_datetime_click(lv_event_t *e);
+
+/**
+ * @brief Start the periodic clock timer (esp_timer) to refresh the header clock label.
+ *
+ * Creates the timer on first call, then starts it if not already running.
+ *
+ * @param ctx Active file browser context.
+ */
+static void file_browser_start_clock_timer(file_browser_ctx_t *ctx);
+
+/**
+ * @brief esp_timer callback fired every second to request a clock label refresh.
+ *
+ * Posts an async call into the LVGL context to update the label.
+ *
+ * @param arg Unused.
+ */
+static void file_browser_clock_timer_cb(void *arg);
+
+/**
+ * @brief LVGL-context callback to update the clock label with current time/date.
+ *
+ * Formats HH:MM - MM/DD/YY and toggles visibility between the label and the
+ * placeholder button once a valid time is set.
+ *
+ * @param arg Unused.
+ */
+static void file_browser_clock_update_async(void *arg);
 
 /**
  * @brief Reset the virtual list window to the first page.
@@ -1134,6 +1173,8 @@ static void file_browser_build_screen(file_browser_ctx_t *ctx)
     lv_obj_set_flex_flow(path_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_gap(path_row, 4, 0);
 
+    file_browser_start_clock_timer(ctx);
+
     lv_obj_t *path_prefix = lv_label_create(path_row);
     lv_label_set_text(path_prefix, "Path: ");
     lv_obj_set_style_text_align(path_prefix, LV_TEXT_ALIGN_LEFT, 0);
@@ -1729,6 +1770,69 @@ static void file_browser_on_datetime_click(lv_event_t *e)
 {
     file_browser_ctx_t *ctx = lv_event_get_user_data(e);
     settings_show_date_time_dialog(ctx ? ctx->screen : NULL);
+}
+
+static void file_browser_start_clock_timer(file_browser_ctx_t *ctx)
+{
+    if (!ctx || ctx->clock_timer_running) {
+        return;
+    }
+
+    if (!ctx->clock_timer) {
+        esp_timer_create_args_t args = {
+            .callback = file_browser_clock_timer_cb,
+            .arg = NULL,
+            .name = "fb_clock"
+        };
+        esp_err_t err = esp_timer_create(&args, &ctx->clock_timer);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create clock timer: %s", esp_err_to_name(err));
+            return;
+        }
+    }
+
+    esp_err_t err = esp_timer_start_periodic(ctx->clock_timer, 1000000); /* 1s */
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "Failed to start clock timer: %s", esp_err_to_name(err));
+        return;
+    }
+    ctx->clock_timer_running = true;
+}
+
+static void file_browser_clock_timer_cb(void *arg)
+{
+    /* Run UI update in LVGL context */
+    lv_async_call(file_browser_clock_update_async, NULL);
+}
+
+static void file_browser_clock_update_async(void *arg)
+{
+    file_browser_ctx_t *ctx = &s_browser;
+    if (!ctx->datetime_label) {
+        return;
+    }
+
+    time_t now = time(NULL);
+    struct tm tm_info;
+    localtime_r(&now, &tm_info);
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%02d:%02d - %02d/%02d/%02d",
+             tm_info.tm_hour,
+             tm_info.tm_min,
+             tm_info.tm_mon + 1,
+             tm_info.tm_mday,
+             (tm_info.tm_year + 1900) % 100);
+
+    lv_label_set_text(ctx->datetime_label, buf);
+
+    /* If a valid time has been set, show the label and hide the button */
+    if (now > 24 * 3600) {
+        if (ctx->datetime_btn) {
+            lv_obj_add_flag(ctx->datetime_btn, LV_OBJ_FLAG_HIDDEN);
+        }
+        lv_obj_clear_flag(ctx->datetime_label, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void file_browser_on_entry_click(lv_event_t *e)

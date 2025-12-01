@@ -10,8 +10,9 @@ idf_component_register(
         fonts
     PRIV_REQUIRES
         esp_driver_sdspi
-        esp_hw_support  
+        esp_hw_support
         nvs_flash       
+        esp_timer  
         settings
         fatfs           
         sdmmc           
