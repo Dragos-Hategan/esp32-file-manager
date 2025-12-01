@@ -409,7 +409,14 @@ static bool settings_is_descendant(lv_obj_t *obj, lv_obj_t *maybe_ancestor);
  * @return true if the date is valid, false otherwise.
  */
 static bool settings_is_valid_date(int year_full, int month, int day);
+/**
+ * @brief Notify registered listeners that time was set via dialog Apply.
+ */
 static void settings_notify_time_set(void);
+
+/**
+ * @brief Notify registered listeners that time was reset via settings reset.
+ */
 static void settings_notify_time_reset(void);
 
 /* Callbacks registered by other modules to react to time set/reset events. */
