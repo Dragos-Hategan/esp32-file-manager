@@ -284,19 +284,118 @@ static void init_settings(void);
  */
 static void settings_rotate_screen(lv_event_t *e);
 
+/**
+ * @brief Build the date/time dialog overlay and wire its events.
+ *
+ * Destroys any existing dialog, constructs the overlay, text areas, action buttons,
+ * and numeric keyboard, and stores pointers in the shared settings context.
+ *
+ * @param ctx Active settings context (must be non-NULL).
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if ctx is NULL.
+ */
 static esp_err_t settings_build_date_time_dialog(settings_ctx_t *ctx);
+
+/**
+ * @brief Settings button handler to open the date/time dialog.
+ *
+ * Uses @ref settings_build_date_time_dialog() to display the picker.
+ *
+ * @param e LVGL event (CLICKED) with user data = settings_ctx_t*.
+ */
 static void settings_set_date_time(lv_event_t *e);
+
+/**
+ * @brief Apply handler for the date/time dialog.
+ *
+ * Parses and validates all fields, writes them into ctx->settings, and closes the dialog.
+ * Shows an "Incorect Input" message box when validation fails.
+ *
+ * @param e LVGL event (CLICKED) with user data = settings_ctx_t*.
+ */
 static void settings_apply_date_time(lv_event_t *e);
+
+/**
+ * @brief Close handler for the date/time dialog (Cancel or overlay tap).
+ *
+ * Deletes the overlay and clears dialog-related pointers in the settings context.
+ *
+ * @param e LVGL event (CLICKED) with user data = settings_ctx_t*.
+ */
 static void settings_close_set_date_time(lv_event_t *e);
+
+/**
+ * @brief OK handler for the invalid-input message box.
+ *
+ * @param e LVGL event (CLICKED) with user data = msgbox obj.
+ */
 static void settings_invalid_ok(lv_event_t *e);
+
+/**
+ * @brief Show a simple "Incorect Input" message box.
+ */
 static void settings_show_invalid_input(void);
+
+/**
+ * @brief Parse an integer from text and clamp to a [min, max] range.
+ *
+ * @param txt Input string.
+ * @param min Minimum accepted value.
+ * @param max Maximum accepted value.
+ * @param out_val Parsed integer on success.
+ * @return true if parse and range check succeed; false otherwise.
+ */
 static bool settings_parse_int_range(const char *txt, int min, int max, int *out_val);
+
+/**
+ * @brief Textarea focus/click handler to prep the keyboard and clear placeholders.
+ *
+ * @param e LVGL event (FOCUSED/CLICKED) with user data = settings_ctx_t*.
+ */
 static void settings_on_dt_textarea_focus(lv_event_t *e);
+
+/**
+ * @brief Overlay/dialog tap handler to hide the keyboard when tapping outside fields.
+ *
+ * @param e LVGL event (CLICKED) with user data = settings_ctx_t*.
+ */
 static void settings_on_dt_background_tap(lv_event_t *e);
+
+/**
+ * @brief Keyboard CANCEL/READY handler to hide the keyboard.
+ *
+ * @param e LVGL event (CANCEL/READY) with user data = settings_ctx_t*.
+ */
 static void settings_on_dt_keyboard_event(lv_event_t *e);
+
+/**
+ * @brief Textarea defocus handler to restore placeholders when left empty.
+ *
+ * @param e LVGL event (DEFOCUSED) with user data = settings_ctx_t*.
+ */
 static void settings_on_dt_textarea_defocus(lv_event_t *e);
+
+/**
+ * @brief Scroll the dialog so the given field (or its row) stays visible.
+ *
+ * @param ctx Settings context.
+ * @param ta  Target textarea to bring into view.
+ */
 static void settings_scroll_field_into_view(settings_ctx_t *ctx, lv_obj_t *ta);
+
+/**
+ * @brief Hide the date/time keyboard and detach it from any textarea.
+ *
+ * @param ctx Settings context.
+ */
 static void settings_hide_dt_keyboard(settings_ctx_t *ctx);
+
+/**
+ * @brief Utility to check if an object is a descendant of another.
+ *
+ * @param obj            Candidate child object.
+ * @param maybe_ancestor Candidate ancestor object.
+ * @return true if obj is a descendant (or same) as maybe_ancestor; false otherwise.
+ */
 static bool settings_is_descendant(lv_obj_t *obj, lv_obj_t *maybe_ancestor);
 
 void starting_routine(void)
@@ -561,8 +660,9 @@ static void settings_on_about(lv_event_t *e)
         "Brightness: adjusts backlight between " STR(SETTINGS_MINIMUM_BRIGHTNESS) "\% and 100\%.",
         "Run Touch Screen Calibration: starts the touch calibration wizard and saves the new calibration data.",
         "Rotate Screen: rotates the display 90 degrees each time.",
+        "Set Date/Time: opens the date/time picker to set clock values (MM/DD/YY HH:MM).",
         "Restart: reboots the device after saving system changes. Note: settings are also saved by simply leaving settings.",
-        "Reset: restores brightness and rotation to defaults, saves them, and reapplies settings immediately.",
+        "Reset: restores brightness, rotation and date/time to defaults, saves them, and reapplies settings immediately.",
     };
 
     for (size_t i = 0; i < sizeof(lines)/sizeof(lines[0]); i++) {
