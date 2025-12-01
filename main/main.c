@@ -2,6 +2,7 @@
 #include "freertos/task.h"
 
 #include "esp_log.h"
+#include "esp_err.h"
 
 #include "file_browser.h"
 #include "settings.h"
@@ -15,7 +16,11 @@ static void main_task(void *arg)
     ESP_LOGI(TAG, "\n\n ********** LVGL File Display ********** \n");
 
     starting_routine();
-    ESP_ERROR_CHECK(file_browser_start());
+    esp_err_t fb_err = file_browser_start();
+    if (fb_err != ESP_OK) {
+        ESP_LOGE(TAG, "file_browser_start failed: %s (waiting for SD retry)", esp_err_to_name(fb_err));
+        vTaskDelete(NULL);
+    }
 
     vTaskDelete(NULL);
 }

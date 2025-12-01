@@ -303,7 +303,7 @@ void starting_routine(void)
     ESP_LOGI(TAG, "Initializing SDSPI");
     esp_err_t err = init_sdspi();
     if (err != ESP_OK){
-        retry_init_sdspi();
+        sdspi_schedule_sd_retry();
     }
 }
 
