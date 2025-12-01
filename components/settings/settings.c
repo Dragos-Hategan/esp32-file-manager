@@ -409,11 +409,11 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_obj_set_flex_grow(settings_list, 1);
     lv_obj_set_scroll_dir(settings_list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(settings_list, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_set_style_pad_top(settings_list, 12, 0);
-    lv_obj_set_style_pad_bottom(settings_list, 12, 0);
+    lv_obj_set_style_pad_top(settings_list, 10, 0);
+    lv_obj_set_style_pad_bottom(settings_list, 10, 0);
     lv_obj_set_style_pad_left(settings_list, 12, 0);
     lv_obj_set_style_pad_right(settings_list, 12, 0);
-    lv_obj_set_style_pad_row(settings_list, 10, 0);  
+    lv_obj_set_style_pad_row(settings_list, 6, 0);  
 
     lv_obj_t *brightness_card = lv_button_create(settings_list);
     lv_obj_set_width(brightness_card, LV_PCT(100));
@@ -459,8 +459,17 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_label_set_text(calibration_lbl, "Run Touch Screen Calibration");
     lv_obj_center(calibration_lbl);       
 
-    lv_obj_t *rotate_button = lv_button_create(settings_list);
-    lv_obj_set_width(rotate_button, LV_PCT(100));
+    /* Row: Rotate + Set Date/Time */
+    lv_obj_t *row_actions1 = lv_obj_create(settings_list);
+    lv_obj_remove_style_all(row_actions1);
+    lv_obj_set_flex_flow(row_actions1, LV_FLEX_FLOW_ROW);
+    lv_obj_set_width(row_actions1, LV_PCT(100));
+    lv_obj_set_style_pad_gap(row_actions1, 6, 0);
+    lv_obj_set_style_pad_all(row_actions1, 0, 0);
+    lv_obj_set_height(row_actions1, LV_SIZE_CONTENT);
+
+    lv_obj_t *rotate_button = lv_button_create(row_actions1);
+    lv_obj_set_flex_grow(rotate_button, 1);
     lv_obj_set_style_radius(rotate_button, 8, 0);
     lv_obj_set_style_pad_all(rotate_button, 10, 0);    
     lv_obj_add_event_cb(rotate_button, settings_rotate_screen, LV_EVENT_CLICKED, ctx);
@@ -469,8 +478,8 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_label_set_text(rotate_lbl, "Rotate Screen");
     lv_obj_center(rotate_lbl);   
 
-    lv_obj_t *set_date_time_button = lv_button_create(settings_list);
-    lv_obj_set_width(set_date_time_button, LV_PCT(100));
+    lv_obj_t *set_date_time_button = lv_button_create(row_actions1);
+    lv_obj_set_flex_grow(set_date_time_button, 1);
     lv_obj_set_style_radius(set_date_time_button, 8, 0);
     lv_obj_set_style_pad_all(set_date_time_button, 10, 0);    
     lv_obj_add_event_cb(set_date_time_button, settings_set_date_time, LV_EVENT_CLICKED, ctx);
@@ -479,8 +488,17 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_label_set_text(set_date_time_lbl, "Set Date/Time");
     lv_obj_center(set_date_time_lbl);  
 
-    lv_obj_t *restart_button = lv_button_create(settings_list);
-    lv_obj_set_width(restart_button, LV_PCT(100));
+    /* Row: Restart + Reset */
+    lv_obj_t *row_actions2 = lv_obj_create(settings_list);
+    lv_obj_remove_style_all(row_actions2);
+    lv_obj_set_flex_flow(row_actions2, LV_FLEX_FLOW_ROW);
+    lv_obj_set_width(row_actions2, LV_PCT(100));
+    lv_obj_set_style_pad_gap(row_actions2, 6, 0);
+    lv_obj_set_style_pad_all(row_actions2, 0, 0);
+    lv_obj_set_height(row_actions2, LV_SIZE_CONTENT);
+
+    lv_obj_t *restart_button = lv_button_create(row_actions2);
+    lv_obj_set_flex_grow(restart_button, 1);
     lv_obj_set_style_radius(restart_button, 8, 0);
     lv_obj_set_style_pad_all(restart_button, 10, 0);    
     lv_obj_add_event_cb(restart_button, settings_restart, LV_EVENT_CLICKED, ctx);
@@ -489,8 +507,8 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_label_set_text(restart_lbl, "Restart");
     lv_obj_center(restart_lbl);
 
-    lv_obj_t *reset_button = lv_button_create(settings_list);
-    lv_obj_set_width(reset_button, LV_PCT(100));
+    lv_obj_t *reset_button = lv_button_create(row_actions2);
+    lv_obj_set_flex_grow(reset_button, 1);
     lv_obj_set_style_radius(reset_button, 8, 0);
     lv_obj_set_style_pad_all(reset_button, 10, 0);    
     lv_obj_add_event_cb(reset_button, settings_reset, LV_EVENT_CLICKED, ctx);
