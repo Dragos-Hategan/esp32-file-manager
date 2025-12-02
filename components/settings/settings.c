@@ -22,6 +22,11 @@
 #define SETTINGS_NVS_ROT_KEY            "rotation_step"
 #define SETTINGS_NVS_BRIGHTNESS_KEY     "brightness_pct"
 #define SETTINGS_NVS_TIME_KEY           "time_epoch"
+#define SETTINGS_NVS_DIM_EN_KEY         "dim_en"
+#define SETTINGS_NVS_DIM_TIME_KEY       "dim_time"
+#define SETTINGS_NVS_DIM_LEVEL_KEY      "dim_level"
+#define SETTINGS_NVS_OFF_EN_KEY         "off_en"
+#define SETTINGS_NVS_OFF_TIME_KEY       "off_time"
 
 #define SETTINGS_ROTATION_STEPS          4
 #define SETTINGS_DEFAULT_ROTATION_STEP   3
@@ -45,6 +50,11 @@ typedef struct{
     int dt_hour;
     int dt_minute;
     bool time_valid;            /**< True if a valid time was set/restored */
+    bool screen_dim;
+    int dim_time;
+    int dim_level;
+    bool screen_off;
+    int off_time;
 }settings_t;
 
 typedef struct{
@@ -293,6 +303,16 @@ static void load_brightness_from_nvs(void);
  * @brief Persist current brightness percent to NVS.
  */
 static void persist_brightness_to_nvs(void);
+
+/**
+ * @brief Load screensaver dim/off settings from NVS (defaults: disabled, -1 values).
+ */
+static void load_screensaver_from_nvs(void);
+
+/**
+ * @brief Persist screensaver dim/off settings to NVS.
+ */
+static void persist_screensaver_to_nvs(void);
 
 /**
  * @brief Initialize runtime settings defaults.
@@ -1047,16 +1067,87 @@ static void persist_brightness_to_nvs(void)
     }
 }
 
+static void load_screensaver_from_nvs(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(SETTINGS_NVS_NS, NVS_READONLY, &h);
+    if (err != ESP_OK) {
+        return;
+    }
+
+    int8_t dim_en = 0;
+    if (nvs_get_i8(h, SETTINGS_NVS_DIM_EN_KEY, &dim_en) == ESP_OK) {
+        s_settings_ctx.settings.screen_dim = dim_en ? true : false;
+    }
+
+    int32_t dim_time = -1;
+    if (nvs_get_i32(h, SETTINGS_NVS_DIM_TIME_KEY, &dim_time) == ESP_OK) {
+        if (dim_time >= -1) {
+            s_settings_ctx.settings.dim_time = (int)dim_time;
+        }
+    }
+
+    int32_t dim_level = -1;
+    if (nvs_get_i32(h, SETTINGS_NVS_DIM_LEVEL_KEY, &dim_level) == ESP_OK) {
+        if (dim_level >= -1 && dim_level <= 100) {
+            s_settings_ctx.settings.dim_level = (int)dim_level;
+        }
+    }
+
+    int8_t off_en = 0;
+    if (nvs_get_i8(h, SETTINGS_NVS_OFF_EN_KEY, &off_en) == ESP_OK) {
+        s_settings_ctx.settings.screen_off = off_en ? true : false;
+    }
+
+    int32_t off_time = -1;
+    if (nvs_get_i32(h, SETTINGS_NVS_OFF_TIME_KEY, &off_time) == ESP_OK) {
+        if (off_time >= -1) {
+            s_settings_ctx.settings.off_time = (int)off_time;
+        }
+    }
+
+    nvs_close(h);
+}
+
+static void persist_screensaver_to_nvs(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(SETTINGS_NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to open NVS for screensaver: %s", esp_err_to_name(err));
+        return;
+    }
+
+    esp_err_t res = nvs_set_i8(h, SETTINGS_NVS_DIM_EN_KEY, s_settings_ctx.settings.screen_dim ? 1 : 0);
+    res |= nvs_set_i32(h, SETTINGS_NVS_DIM_TIME_KEY, s_settings_ctx.settings.dim_time);
+    res |= nvs_set_i32(h, SETTINGS_NVS_DIM_LEVEL_KEY, s_settings_ctx.settings.dim_level);
+    res |= nvs_set_i8(h, SETTINGS_NVS_OFF_EN_KEY, s_settings_ctx.settings.screen_off ? 1 : 0);
+    res |= nvs_set_i32(h, SETTINGS_NVS_OFF_TIME_KEY, s_settings_ctx.settings.off_time);
+    if (res == ESP_OK) {
+        res = nvs_commit(h);
+    }
+    nvs_close(h);
+
+    if (res != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to save screensaver settings: %s", esp_err_to_name(res));
+    }
+}
+
 static void init_settings(void)
 {
-    /* Default state corresponds to 0-degree rotation (state 3 in our sequence). */
     s_settings_ctx.settings.screen_rotation_step = SETTINGS_DEFAULT_ROTATION_STEP;
     s_settings_ctx.settings.saved_rotation_step = s_settings_ctx.settings.screen_rotation_step;
     s_settings_ctx.settings.brightness = SETTINGS_DEFAULT_BRIGHTNESS;
     s_settings_ctx.settings.saved_brightness = SETTINGS_DEFAULT_BRIGHTNESS;
     s_settings_ctx.settings.time_valid = false;
+    s_settings_ctx.settings.screen_dim = false;
+    s_settings_ctx.settings.dim_time = -1;
+    s_settings_ctx.settings.dim_level = -1;
+    s_settings_ctx.settings.screen_off = false;
+    s_settings_ctx.settings.off_time = -1;
     load_brightness_from_nvs();
     load_rotation_from_nvs();
+    load_screensaver_from_nvs();
     bsp_display_brightness_set(s_settings_ctx.settings.brightness);
     apply_rotation_to_display(true);
     settings_restore_time_from_nvs();
