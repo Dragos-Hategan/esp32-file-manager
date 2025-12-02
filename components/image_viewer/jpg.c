@@ -436,7 +436,7 @@ static esp_err_t jpg_draw_striped(const char *path, esp_lcd_panel_handle_t panel
         goto cleanup;
     }
 
-    ESP_LOGI(TAG, "Drawing JPEG %ux%u scaled 1/%u -> %lux%lu",
+    ESP_LOGD(TAG, "Drawing JPEG %ux%u scaled 1/%u -> %lux%lu",
              jd.width, jd.height, 1U << ctx.scale,
              (unsigned long)scaled_w, (unsigned long)scaled_h);
 

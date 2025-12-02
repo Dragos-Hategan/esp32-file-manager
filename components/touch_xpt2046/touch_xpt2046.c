@@ -155,7 +155,7 @@ esp_lcd_touch_handle_t touch_get_handle(void)
 
 void touch_log_press(uint16_t x, uint16_t y)
 {
-    ESP_LOGI(TAG_TOUCH, "\nTouch press: x=%u y=%u", (unsigned)x, (unsigned)y);
+    ESP_LOGD(TAG_TOUCH, "Touch press: x=%u y=%u", (unsigned)x, (unsigned)y);
 }
 
 static lv_indev_t *register_touch_with_lvgl(void)

@@ -855,16 +855,6 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_obj_set_style_pad_all(row_actions0, 0, 0);
     lv_obj_set_height(row_actions0, LV_SIZE_CONTENT);    
 
-    lv_obj_t *calibration_button = lv_button_create(row_actions0);
-    lv_obj_set_flex_grow(calibration_button, 1);
-    lv_obj_set_style_radius(calibration_button, 8, 0);
-    lv_obj_set_style_pad_all(calibration_button, 10, 0); 
-    lv_obj_add_event_cb(calibration_button, settings_run_calibration, LV_EVENT_CLICKED, ctx);
-    lv_obj_set_style_align(calibration_button, LV_ALIGN_CENTER, 0);
-    lv_obj_t *calibration_lbl = lv_label_create(calibration_button);
-    lv_label_set_text(calibration_lbl, "Run Calibration");
-    lv_obj_center(calibration_lbl);    
-    
     lv_obj_t *screen_saver_button = lv_button_create(row_actions0);
     lv_obj_set_flex_grow(screen_saver_button, 1);
     lv_obj_set_style_radius(screen_saver_button, 8, 0);
@@ -873,7 +863,17 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_obj_set_style_align(screen_saver_button, LV_ALIGN_CENTER, 0);
     lv_obj_t *screen_saver_lbl = lv_label_create(screen_saver_button);
     lv_label_set_text(screen_saver_lbl, "Screensaver");
-    lv_obj_center(screen_saver_lbl);     
+    lv_obj_center(screen_saver_lbl);  
+
+    lv_obj_t *set_date_time_button = lv_button_create(row_actions0);
+    lv_obj_set_flex_grow(set_date_time_button, 1);
+    lv_obj_set_style_radius(set_date_time_button, 8, 0);
+    lv_obj_set_style_pad_all(set_date_time_button, 10, 0);    
+    lv_obj_add_event_cb(set_date_time_button, settings_set_date_time, LV_EVENT_CLICKED, ctx);
+    lv_obj_set_style_align(set_date_time_button, LV_ALIGN_CENTER, 0);
+    lv_obj_t *set_date_time_lbl = lv_label_create(set_date_time_button);
+    lv_label_set_text(set_date_time_lbl, "Set Date/Time");
+    lv_obj_center(set_date_time_lbl);          
     
     /* Row: Rotate + Set Date/Time */
     lv_obj_t *row_actions1 = lv_obj_create(settings_list);
@@ -894,15 +894,15 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_label_set_text(rotate_lbl, "Rotate Screen");
     lv_obj_center(rotate_lbl);   
 
-    lv_obj_t *set_date_time_button = lv_button_create(row_actions1);
-    lv_obj_set_flex_grow(set_date_time_button, 1);
-    lv_obj_set_style_radius(set_date_time_button, 8, 0);
-    lv_obj_set_style_pad_all(set_date_time_button, 10, 0);    
-    lv_obj_add_event_cb(set_date_time_button, settings_set_date_time, LV_EVENT_CLICKED, ctx);
-    lv_obj_set_style_align(set_date_time_button, LV_ALIGN_CENTER, 0);
-    lv_obj_t *set_date_time_lbl = lv_label_create(set_date_time_button);
-    lv_label_set_text(set_date_time_lbl, "Set Date/Time");
-    lv_obj_center(set_date_time_lbl);  
+    lv_obj_t *calibration_button = lv_button_create(row_actions1);
+    lv_obj_set_flex_grow(calibration_button, 1);
+    lv_obj_set_style_radius(calibration_button, 8, 0);
+    lv_obj_set_style_pad_all(calibration_button, 10, 0); 
+    lv_obj_add_event_cb(calibration_button, settings_run_calibration, LV_EVENT_CLICKED, ctx);
+    lv_obj_set_style_align(calibration_button, LV_ALIGN_CENTER, 0);
+    lv_obj_t *calibration_lbl = lv_label_create(calibration_button);
+    lv_label_set_text(calibration_lbl, "Run Calibration");
+    lv_obj_center(calibration_lbl);   
 
     /* Row: Restart + Reset */
     lv_obj_t *row_actions2 = lv_obj_create(settings_list);
@@ -975,12 +975,12 @@ static void settings_on_about(lv_event_t *e)
 
     const char *lines[] = {
         "Brightness: adjusts backlight between " STR(SETTINGS_MINIMUM_BRIGHTNESS) "\% and 100\%.",
-        "Run Calibration: starts the touch calibration wizard and saves the new calibration data.",
-        "Screensaver: opens the screensaver configuration for dimming and turning the screen off.",
-        "Rotate Screen: rotates the display 90 degrees each time.",
+        "Screensaver: opens the screensaver configuration for dimming and turning off the screen.",
         "Set Date/Time: opens the date/time picker to set clock values (MM/DD/YY HH:MM).",
+        "Rotate Screen: rotates the display 90 degrees each time.",
+        "Run Calibration: starts the touch calibration wizard and saves the new calibration data.",
         "Restart: reboots the device after saving system changes. Note: settings are also saved by simply leaving settings.",
-        "Reset: restores brightness, rotation and date/time to defaults, saves them, and reapplies settings immediately.",
+        "Reset: restores and saves screensaver, brightness, rotation and date/time to defaults.",
     };
 
     for (size_t i = 0; i < sizeof(lines)/sizeof(lines[0]); i++) {
@@ -1924,7 +1924,7 @@ static void settings_update_off_controls_enabled(settings_ctx_t *ctx, bool enabl
 
 static void screensaver_dim_start(int seconds, int level_pct)
 {
-    ESP_LOGI(TAG, "Start dim timer: %ds -> %d%%", seconds, level_pct);
+    ESP_LOGD(TAG, "Start dim timer: %ds -> %d%%", seconds, level_pct);
     if (s_ss_dim_timer == NULL) {
         const esp_timer_create_args_t args = {
             .callback = settings_dim_timer_cb,
@@ -1950,7 +1950,9 @@ static void screensaver_dim_start(int seconds, int level_pct)
 
 static void screensaver_dim_stop(void)
 {
-    ESP_LOGI(TAG, "Stop dim timer");
+    if (!s_settings_ctx.changing_brightness){
+        ESP_LOGD(TAG, "Stop dim timer");
+    }
     if (s_ss_dim_timer) {
         esp_timer_stop(s_ss_dim_timer);
     }
@@ -1958,7 +1960,7 @@ static void screensaver_dim_stop(void)
 
 static void screensaver_off_start(int seconds)
 {
-    ESP_LOGI(TAG, "Start screen-off timer: %ds", seconds);
+    ESP_LOGD(TAG, "Start screen-off timer: %ds", seconds);
     if (s_ss_off_timer == NULL) {
         const esp_timer_create_args_t args = {
             .callback = settings_off_timer_cb,
@@ -1984,7 +1986,9 @@ static void screensaver_off_start(int seconds)
 
 static void screensaver_off_stop(void)
 {
-    ESP_LOGI(TAG, "Stop screen-off timer");
+    if (!s_settings_ctx.changing_brightness){
+        ESP_LOGD(TAG, "Stop screen-off timer");
+    }
     if (s_ss_off_timer) {
         esp_timer_stop(s_ss_off_timer);
     }
@@ -1994,14 +1998,14 @@ static void screensaver_off_stop(void)
 static void settings_off_timer_cb(void *arg)
 {
     (void)arg;
-    ESP_LOGI(TAG, "Off timer fired: fading screen off");
+    ESP_LOGD(TAG, "Off timer fired: fading screen off");
     settings_fade_brightness(0, SETTINGS_OFF_FADE_MS);
 }
 
 static void settings_dim_timer_cb(void *arg)
 {
     (void)arg;
-    ESP_LOGI(TAG, "Dim timer fired: fading to dim level");
+    ESP_LOGD(TAG, "Dim timer fired: fading to dim level");
     settings_fade_brightness(s_settings_ctx.settings.dim_level, SETTINGS_DIM_FADE_MS);
 }
 
@@ -2060,7 +2064,7 @@ static void settings_fade_brightness(int target_pct, uint32_t duration_ms)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start fade timer: %s", esp_err_to_name(err));
     } else {
-        ESP_LOGI(TAG, "Fade start: %d -> %d over %ums (step %lldus)", start, target_pct, duration_ms, interval_us);
+        ESP_LOGD(TAG, "Fade start: %d -> %d over %ums (step %lldus)", start, target_pct, duration_ms, interval_us);
     }
 }
 
@@ -2074,7 +2078,7 @@ static void settings_fade_step_cb(void *arg)
         s_settings_ctx.settings.brightness = s_fade_target;
         bsp_display_brightness_set(s_fade_target);
         settings_sync_brightness_ui(&s_settings_ctx, s_fade_target);
-        ESP_LOGI(TAG, "Fade complete -> %d", s_fade_target);
+        ESP_LOGD(TAG, "Fade complete -> %d", s_fade_target);
         s_wake_in_progress = false;
         return;
     }
@@ -2445,6 +2449,7 @@ static void settings_calibration_task(void *param)
     screensaver_dim_stop();
     screensaver_off_stop();
     calibration_test(true);
+    s_settings_ctx.changing_brightness = false;  
     settings_start_screensaver_timers();
 
     ctx->settings.screen_rotation_step = prev_rotation;
