@@ -465,6 +465,14 @@ static void settings_on_ss_background_tap(lv_event_t *e);
 static void settings_on_ss_keyboard_event(lv_event_t *e);
 
 /**
+ * @brief Start/stop hooks for screensaver dim/off timers.
+ */
+static void screensaver_dim_start(int seconds, int level_pct);
+static void screensaver_dim_stop(void);
+static void screensaver_off_start(int seconds);
+static void screensaver_off_stop(void);
+
+/**
  * @brief Toggle handler for screensaver off switch to enable/disable related fields.
  */
 static void settings_on_off_switch_changed(lv_event_t *e);
@@ -709,7 +717,7 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_obj_add_event_cb(calibration_button, settings_run_calibration, LV_EVENT_CLICKED, ctx);
     lv_obj_set_style_align(calibration_button, LV_ALIGN_CENTER, 0);
     lv_obj_t *calibration_lbl = lv_label_create(calibration_button);
-    lv_label_set_text(calibration_lbl, "Screen Calibration");
+    lv_label_set_text(calibration_lbl, "Calibration");
     lv_obj_center(calibration_lbl);    
     
     lv_obj_t *screen_saver_button = lv_button_create(row_actions0);
@@ -1064,6 +1072,25 @@ static void persist_brightness_to_nvs(void)
         ESP_LOGW(TAG, "Failed to save brightness to NVS: %s", esp_err_to_name(err));
     } else {
         s_settings_ctx.settings.saved_brightness = s_settings_ctx.settings.brightness;
+
+        /* Adjust dim level to stay within saved brightness and above minimum. */
+        if (s_settings_ctx.settings.dim_level >= 0) {
+            int max_level = s_settings_ctx.settings.saved_brightness;
+            if (max_level < SETTINGS_MINIMUM_BRIGHTNESS) {
+                max_level = SETTINGS_MINIMUM_BRIGHTNESS;
+            }
+            int clamped = s_settings_ctx.settings.dim_level;
+            if (clamped > max_level) {
+                clamped = max_level;
+            }
+            if (clamped < SETTINGS_MINIMUM_BRIGHTNESS) {
+                clamped = SETTINGS_MINIMUM_BRIGHTNESS;
+            }
+            if (clamped != s_settings_ctx.settings.dim_level) {
+                s_settings_ctx.settings.dim_level = clamped;
+                persist_screensaver_to_nvs();
+            }
+        }
     }
 }
 
@@ -1107,6 +1134,22 @@ static void load_screensaver_from_nvs(void)
     }
 
     nvs_close(h);
+
+    /* Clamp dim level against current saved brightness and minimum brightness. */
+    if (s_settings_ctx.settings.dim_level >= 0) {
+        int max_level = s_settings_ctx.settings.saved_brightness > 0 ? s_settings_ctx.settings.saved_brightness : SETTINGS_DEFAULT_BRIGHTNESS;
+        int clamped = s_settings_ctx.settings.dim_level;
+        if (max_level < SETTINGS_MINIMUM_BRIGHTNESS) {
+            max_level = SETTINGS_MINIMUM_BRIGHTNESS;
+        }
+        if (clamped > max_level) {
+            clamped = max_level;
+        }
+        if (clamped < SETTINGS_MINIMUM_BRIGHTNESS) {
+            clamped = SETTINGS_MINIMUM_BRIGHTNESS;
+        }
+        s_settings_ctx.settings.dim_level = clamped;
+    }
 }
 
 static void persist_screensaver_to_nvs(void)
@@ -1657,8 +1700,16 @@ static void settings_update_dim_controls_enabled(settings_ctx_t *ctx, bool enabl
         }
         if (enabled) {
             lv_obj_clear_state(ta, LV_STATE_DISABLED);
+            /* If empty, restore from placeholder so last value shows when re-enabled. */
+            const char *txt = lv_textarea_get_text(ta);
+            const char *ph = lv_textarea_get_placeholder_text(ta);
+            if (txt && txt[0] == '\0' && ph && ph[0] != '\0') {
+                lv_textarea_set_text(ta, ph);
+            }
         } else {
             lv_obj_add_state(ta, LV_STATE_DISABLED);
+            /* Clear text so placeholder (last known value) is visible while disabled. */
+            lv_textarea_set_text(ta, "");
         }
     }
 
@@ -1697,8 +1748,14 @@ static void settings_update_off_controls_enabled(settings_ctx_t *ctx, bool enabl
     if (ctx->ss_off_after_ta) {
         if (enabled) {
             lv_obj_clear_state(ctx->ss_off_after_ta, LV_STATE_DISABLED);
+            const char *txt = lv_textarea_get_text(ctx->ss_off_after_ta);
+            const char *ph = lv_textarea_get_placeholder_text(ctx->ss_off_after_ta);
+            if (txt && txt[0] == '\0' && ph && ph[0] != '\0') {
+                lv_textarea_set_text(ctx->ss_off_after_ta, ph);
+            }
         } else {
             lv_obj_add_state(ctx->ss_off_after_ta, LV_STATE_DISABLED);
+            lv_textarea_set_text(ctx->ss_off_after_ta, "");
         }
     }
 
@@ -1709,6 +1766,31 @@ static void settings_update_off_controls_enabled(settings_ctx_t *ctx, bool enabl
             lv_obj_add_flag(ctx->ss_keyboard, LV_OBJ_FLAG_HIDDEN);
         }
     }
+}
+
+static void screensaver_dim_start(int seconds, int level_pct)
+{
+    ESP_LOGI(TAG, "Start dim timer: %ds -> %d%%", seconds, level_pct);
+    /* TODO: wire actual dim timer start here. */
+    /* TODO: ensure dim timer is skipped when off_time <= dim_time (handled by dim_allowed check). */
+}
+
+static void screensaver_dim_stop(void)
+{
+    ESP_LOGI(TAG, "Stop dim timer");
+    /* TODO: wire actual dim timer stop here. */
+}
+
+static void screensaver_off_start(int seconds)
+{
+    ESP_LOGI(TAG, "Start screen-off timer: %ds", seconds);
+    /* TODO: wire actual screen-off timer start here. */
+}
+
+static void screensaver_off_stop(void)
+{
+    ESP_LOGI(TAG, "Stop screen-off timer");
+    /* TODO: wire actual screen-off timer stop here. */
 }
 
 static void settings_scroll_field_into_view(settings_ctx_t *ctx, lv_obj_t *ta)
@@ -1968,8 +2050,16 @@ static void settings_reset_confirm(lv_event_t *e)
     lv_snprintf(brightness_txt, sizeof(brightness_txt), "Brightness: %d%%", ctx->settings.brightness);
     lv_label_set_text(ctx->brightness_label, brightness_txt);    
 
+    /* Reset screensaver settings */
+    ctx->settings.screen_dim = false;
+    ctx->settings.dim_time = -1;
+    ctx->settings.dim_level = -1;
+    ctx->settings.screen_off = false;
+    ctx->settings.off_time = -1;
+
     persist_brightness_to_nvs();
     persist_rotation_to_nvs();
+    persist_screensaver_to_nvs();
     init_settings();
     settings_clear_time_in_nvs();
     s_settings_ctx.settings.time_valid = false;
@@ -2123,7 +2213,11 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
 
     lv_obj_t *dim_switch = lv_switch_create(row_dim);
     lv_obj_set_style_pad_all(dim_switch, 4, 0);
-    lv_obj_add_state(dim_switch, LV_STATE_CHECKED);
+    if (ctx->settings.screen_dim) {
+        lv_obj_add_state(dim_switch, LV_STATE_CHECKED);
+    } else {
+        lv_obj_clear_state(dim_switch, LV_STATE_CHECKED);
+    }
     lv_obj_add_event_cb(dim_switch, settings_on_dim_switch_changed, LV_EVENT_VALUE_CHANGED, ctx);
     ctx->ss_dim_switch = dim_switch;
 
@@ -2148,7 +2242,19 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_clear_flag(ctx->ss_dim_after_ta, LV_OBJ_FLAG_SCROLLABLE);
     lv_textarea_set_one_line(ctx->ss_dim_after_ta, true);
     lv_textarea_set_max_length(ctx->ss_dim_after_ta, 3);
-    lv_textarea_set_placeholder_text(ctx->ss_dim_after_ta, "in");
+    if (ctx->settings.dim_time >= 0) {
+        char buf[8];
+        lv_snprintf(buf, sizeof(buf), "%d", ctx->settings.dim_time);
+        lv_textarea_set_placeholder_text(ctx->ss_dim_after_ta, buf);
+        if (ctx->settings.screen_dim) {
+            lv_textarea_set_text(ctx->ss_dim_after_ta, buf);
+        } else {
+            lv_textarea_set_text(ctx->ss_dim_after_ta, "");
+        }
+    } else {
+        lv_textarea_set_placeholder_text(ctx->ss_dim_after_ta, "");
+        lv_textarea_set_text(ctx->ss_dim_after_ta, "");
+    }
     lv_obj_add_event_cb(ctx->ss_dim_after_ta, settings_on_ss_textarea_focus, LV_EVENT_FOCUSED, ctx);
     lv_obj_add_event_cb(ctx->ss_dim_after_ta, settings_on_ss_textarea_focus, LV_EVENT_CLICKED, ctx);
 
@@ -2167,7 +2273,19 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_clear_flag(ctx->ss_dim_pct_ta, LV_OBJ_FLAG_SCROLLABLE);
     lv_textarea_set_one_line(ctx->ss_dim_pct_ta, true);
     lv_textarea_set_max_length(ctx->ss_dim_pct_ta, 3);
-    lv_textarea_set_placeholder_text(ctx->ss_dim_pct_ta, "in");
+    if (ctx->settings.dim_level >= 0) {
+        char buf[8];
+        lv_snprintf(buf, sizeof(buf), "%d", ctx->settings.dim_level);
+        lv_textarea_set_placeholder_text(ctx->ss_dim_pct_ta, buf);
+        if (ctx->settings.screen_dim) {
+            lv_textarea_set_text(ctx->ss_dim_pct_ta, buf);
+        } else {
+            lv_textarea_set_text(ctx->ss_dim_pct_ta, "");
+        }
+    } else {
+        lv_textarea_set_placeholder_text(ctx->ss_dim_pct_ta, "");
+        lv_textarea_set_text(ctx->ss_dim_pct_ta, "");
+    }
     lv_obj_add_event_cb(ctx->ss_dim_pct_ta, settings_on_ss_textarea_focus, LV_EVENT_FOCUSED, ctx);
     lv_obj_add_event_cb(ctx->ss_dim_pct_ta, settings_on_ss_textarea_focus, LV_EVENT_CLICKED, ctx);
 
@@ -2194,7 +2312,11 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
 
     lv_obj_t *off_switch = lv_switch_create(row_off);
     lv_obj_set_style_pad_all(off_switch, 4, 0);
-    lv_obj_add_state(off_switch, LV_STATE_CHECKED);
+    if (ctx->settings.screen_off) {
+        lv_obj_add_state(off_switch, LV_STATE_CHECKED);
+    } else {
+        lv_obj_clear_state(off_switch, LV_STATE_CHECKED);
+    }
     lv_obj_add_event_cb(off_switch, settings_on_off_switch_changed, LV_EVENT_VALUE_CHANGED, ctx);
     ctx->ss_off_switch = off_switch;
 
@@ -2219,7 +2341,19 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_clear_flag(ctx->ss_off_after_ta, LV_OBJ_FLAG_SCROLLABLE);
     lv_textarea_set_one_line(ctx->ss_off_after_ta, true);
     lv_textarea_set_max_length(ctx->ss_off_after_ta, 4);
-    lv_textarea_set_placeholder_text(ctx->ss_off_after_ta, "in");
+    if (ctx->settings.off_time >= 0) {
+        char buf[12];
+        lv_snprintf(buf, sizeof(buf), "%d", ctx->settings.off_time);
+        lv_textarea_set_placeholder_text(ctx->ss_off_after_ta, buf);
+        if (ctx->settings.screen_off) {
+            lv_textarea_set_text(ctx->ss_off_after_ta, buf);
+        } else {
+            lv_textarea_set_text(ctx->ss_off_after_ta, "");
+        }
+    } else {
+        lv_textarea_set_placeholder_text(ctx->ss_off_after_ta, "");
+        lv_textarea_set_text(ctx->ss_off_after_ta, "");
+    }
     lv_obj_add_event_cb(ctx->ss_off_after_ta, settings_on_ss_textarea_focus, LV_EVENT_FOCUSED, ctx);
     lv_obj_add_event_cb(ctx->ss_off_after_ta, settings_on_ss_textarea_focus, LV_EVENT_CLICKED, ctx);
 
@@ -2276,25 +2410,108 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
 static void settings_apply_screensaver(lv_event_t *e)
 {
     settings_ctx_t *ctx = lv_event_get_user_data(e);
-    if (ctx && ctx->screensaver_overlay) {
-        lv_obj_del(ctx->screensaver_overlay);
-        ctx->screensaver_overlay = NULL;
-        ctx->screensaver_dialog = NULL;
-        ctx->ss_dim_lbl = NULL;
-        ctx->ss_dim_switch = NULL;
-        ctx->ss_dim_after_lbl = NULL;
-        ctx->ss_seconds_lbl = NULL;
-        ctx->ss_at_lbl = NULL;
-        ctx->ss_pct_lbl = NULL;
-        ctx->ss_dim_after_ta = NULL;
-        ctx->ss_dim_pct_ta = NULL;
-        ctx->ss_off_lbl = NULL;
-        ctx->ss_off_switch = NULL;
-        ctx->ss_off_after_lbl = NULL;
-        ctx->ss_off_seconds_lbl = NULL;
-        ctx->ss_off_after_ta = NULL;
-        ctx->ss_keyboard = NULL;
-    }  
+    if (!ctx || !ctx->screensaver_overlay) {
+        return;
+    }
+
+    bool dim_on = ctx->ss_dim_switch && lv_obj_has_state(ctx->ss_dim_switch, LV_STATE_CHECKED);
+    bool off_on = ctx->ss_off_switch && lv_obj_has_state(ctx->ss_off_switch, LV_STATE_CHECKED);
+
+    int new_dim_time = ctx->settings.dim_time;
+    int new_dim_level = ctx->settings.dim_level;
+    int new_off_time = ctx->settings.off_time;
+
+    /* Validate dim when enabled. */
+    if (dim_on) {
+        const char *dim_time_txt = ctx->ss_dim_after_ta ? lv_textarea_get_text(ctx->ss_dim_after_ta) : NULL;
+        const char *dim_level_txt = ctx->ss_dim_pct_ta ? lv_textarea_get_text(ctx->ss_dim_pct_ta) : NULL;
+        int parsed_time = 0;
+        int parsed_level = 0;
+
+        /* dim time: 1..9999 (textarea limited to 3 chars) */
+        if (!settings_parse_int_range(dim_time_txt, 1, 9999, &parsed_time)) {
+            settings_show_invalid_input();
+            return;
+        }
+
+        /* Accept any 0..100 value, clamp later against brightness/minimum. */
+        if (!settings_parse_int_range(dim_level_txt, 0, 100, &parsed_level)) {
+            settings_show_invalid_input();
+            return;
+        }
+
+        new_dim_time = parsed_time;
+        new_dim_level = parsed_level;
+    }
+
+    /* Validate off when enabled. */
+    if (off_on) {
+        const char *off_time_txt = ctx->ss_off_after_ta ? lv_textarea_get_text(ctx->ss_off_after_ta) : NULL;
+        int parsed_off = 0;
+        if (!settings_parse_int_range(off_time_txt, 1, 99999, &parsed_off)) {
+            settings_show_invalid_input();
+            return;
+        }
+        new_off_time = parsed_off;
+    }
+
+    /* Apply in-memory state. Keep last valid values even when feature is off. */
+    ctx->settings.screen_dim = dim_on;
+    ctx->settings.dim_time = new_dim_time;
+    /* Clamp dim level to brightness bounds even if feature disabled. */
+    if (new_dim_level >= 0) {
+        int max_level = ctx->settings.saved_brightness > 0 ? ctx->settings.saved_brightness : SETTINGS_DEFAULT_BRIGHTNESS;
+        if (max_level < SETTINGS_MINIMUM_BRIGHTNESS) {
+            max_level = SETTINGS_MINIMUM_BRIGHTNESS;
+        }
+        if (new_dim_level > max_level) new_dim_level = max_level;
+        if (new_dim_level < SETTINGS_MINIMUM_BRIGHTNESS) new_dim_level = SETTINGS_MINIMUM_BRIGHTNESS;
+    }
+
+    ctx->settings.dim_level = new_dim_level;
+    ctx->settings.screen_off = off_on;
+    ctx->settings.off_time = new_off_time;
+
+    /* Persist */
+    persist_screensaver_to_nvs();
+
+    /* Start/stop timers */
+    bool dim_allowed = ctx->settings.screen_dim &&
+                       (!ctx->settings.screen_off ||
+                        ctx->settings.off_time <= 0 ||
+                        ctx->settings.dim_time <= 0 ||
+                        ctx->settings.dim_time < ctx->settings.off_time);
+
+    if (dim_allowed) {
+        screensaver_dim_start(ctx->settings.dim_time, ctx->settings.dim_level);
+    } else {
+        screensaver_dim_stop();
+    }
+
+    if (ctx->settings.screen_off) {
+        screensaver_off_start(ctx->settings.off_time);
+    } else {
+        screensaver_off_stop();
+    }
+
+    /* Close dialog */
+    lv_obj_del(ctx->screensaver_overlay);
+    ctx->screensaver_overlay = NULL;
+    ctx->screensaver_dialog = NULL;
+    ctx->ss_dim_lbl = NULL;
+    ctx->ss_dim_switch = NULL;
+    ctx->ss_dim_after_lbl = NULL;
+    ctx->ss_seconds_lbl = NULL;
+    ctx->ss_at_lbl = NULL;
+    ctx->ss_pct_lbl = NULL;
+    ctx->ss_dim_after_ta = NULL;
+    ctx->ss_dim_pct_ta = NULL;
+    ctx->ss_off_lbl = NULL;
+    ctx->ss_off_switch = NULL;
+    ctx->ss_off_after_lbl = NULL;
+    ctx->ss_off_seconds_lbl = NULL;
+    ctx->ss_off_after_ta = NULL;
+    ctx->ss_keyboard = NULL;
 }
 
 static void settings_close_screensaver(lv_event_t *e)
