@@ -80,6 +80,7 @@ typedef struct{
     lv_obj_t *ss_off_after_lbl;         /**< Label: "Turn screen off after" */
     lv_obj_t *ss_off_seconds_lbl;       /**< Label: "seconds." */
     lv_obj_t *ss_off_after_ta;          /**< Screensaver off delay input (seconds) */
+    lv_obj_t *ss_keyboard;              /**< Screensaver numeric keyboard */
     settings_t settings;                /**< Information about the current session */
 }settings_ctx_t;
 
@@ -427,6 +428,21 @@ static void settings_on_dim_switch_changed(lv_event_t *e);
  * @brief Apply enabled/disabled state to dimming controls based on switch state.
  */
 static void settings_update_dim_controls_enabled(settings_ctx_t *ctx, bool enabled);
+
+/**
+ * @brief Hide the screensaver keyboard and detach it from any textarea.
+ */
+static void settings_hide_ss_keyboard(settings_ctx_t *ctx);
+
+/**
+ * @brief Overlay/dialog tap handler for screensaver dialog.
+ */
+static void settings_on_ss_background_tap(lv_event_t *e);
+
+/**
+ * @brief Screensaver keyboard CANCEL/READY handler.
+ */
+static void settings_on_ss_keyboard_event(lv_event_t *e);
 
 /**
  * @brief Toggle handler for screensaver off switch to enable/disable related fields.
@@ -1407,10 +1423,7 @@ static void settings_on_dt_background_tap(lv_event_t *e)
         settings_is_descendant(target, ctx->dt_day_ta) ||
         settings_is_descendant(target, ctx->dt_year_ta) ||
         settings_is_descendant(target, ctx->dt_hour_ta) ||
-        settings_is_descendant(target, ctx->dt_min_ta) ||
-        settings_is_descendant(target, ctx->ss_dim_after_ta) ||
-        settings_is_descendant(target, ctx->ss_dim_pct_ta) ||
-        settings_is_descendant(target, ctx->ss_off_after_ta)) {
+        settings_is_descendant(target, ctx->dt_min_ta)) {
         return;
     }
 
@@ -1426,6 +1439,15 @@ static void settings_hide_dt_keyboard(settings_ctx_t *ctx)
     lv_obj_add_flag(ctx->dt_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void settings_hide_ss_keyboard(settings_ctx_t *ctx)
+{
+    if (!ctx || !ctx->ss_keyboard) {
+        return;
+    }
+    lv_keyboard_set_textarea(ctx->ss_keyboard, NULL);
+    lv_obj_add_flag(ctx->ss_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void settings_on_dt_keyboard_event(lv_event_t *e)
 {
     settings_ctx_t *ctx = lv_event_get_user_data(e);
@@ -1435,10 +1457,39 @@ static void settings_on_dt_keyboard_event(lv_event_t *e)
     settings_hide_dt_keyboard(ctx);
 }
 
+static void settings_on_ss_background_tap(lv_event_t *e)
+{
+    settings_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx) {
+        return;
+    }
+
+    lv_obj_t *target = lv_event_get_target(e);
+    if (settings_is_descendant(target, ctx->ss_keyboard)) {
+        return;
+    }
+    if (settings_is_descendant(target, ctx->ss_dim_after_ta) ||
+        settings_is_descendant(target, ctx->ss_dim_pct_ta) ||
+        settings_is_descendant(target, ctx->ss_off_after_ta)) {
+        return;
+    }
+
+    settings_hide_ss_keyboard(ctx);
+}
+
+static void settings_on_ss_keyboard_event(lv_event_t *e)
+{
+    settings_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx) {
+        return;
+    }
+    settings_hide_ss_keyboard(ctx);
+}
+
 static void settings_on_ss_textarea_focus(lv_event_t *e)
 {
     settings_ctx_t *ctx = lv_event_get_user_data(e);
-    if (!ctx || !ctx->dt_keyboard) {
+    if (!ctx || !ctx->ss_keyboard) {
         return;
     }
 
@@ -1446,8 +1497,8 @@ static void settings_on_ss_textarea_focus(lv_event_t *e)
     if (lv_obj_has_state(ta, LV_STATE_DISABLED)) {
         return;
     }
-    lv_keyboard_set_textarea(ctx->dt_keyboard, ta);
-    lv_obj_clear_flag(ctx->dt_keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_keyboard_set_textarea(ctx->ss_keyboard, ta);
+    lv_obj_clear_flag(ctx->ss_keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_scroll_to_view(ta, LV_ANIM_ON);
 }
 
@@ -1460,7 +1511,7 @@ static void settings_on_dim_switch_changed(lv_event_t *e)
     lv_obj_t *sw = lv_event_get_target(e);
     bool enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
     if (!enabled) {
-        settings_hide_dt_keyboard(ctx);
+        settings_hide_ss_keyboard(ctx);
     }
     settings_update_dim_controls_enabled(ctx, enabled);
 }
@@ -1474,7 +1525,7 @@ static void settings_on_off_switch_changed(lv_event_t *e)
     lv_obj_t *sw = lv_event_get_target(e);
     bool enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
     if (!enabled) {
-        settings_hide_dt_keyboard(ctx);
+        settings_hide_ss_keyboard(ctx);
     }
     settings_update_off_controls_enabled(ctx, enabled);
 }
@@ -1520,11 +1571,11 @@ static void settings_update_dim_controls_enabled(settings_ctx_t *ctx, bool enabl
         }
     }
 
-    if (!enabled && ctx->dt_keyboard) {
-        lv_obj_t *attached = lv_keyboard_get_textarea(ctx->dt_keyboard);
+    if (!enabled && ctx->ss_keyboard) {
+        lv_obj_t *attached = lv_keyboard_get_textarea(ctx->ss_keyboard);
         if (attached == ctx->ss_dim_after_ta || attached == ctx->ss_dim_pct_ta) {
-            lv_keyboard_set_textarea(ctx->dt_keyboard, NULL);
-            lv_obj_add_flag(ctx->dt_keyboard, LV_OBJ_FLAG_HIDDEN);
+            lv_keyboard_set_textarea(ctx->ss_keyboard, NULL);
+            lv_obj_add_flag(ctx->ss_keyboard, LV_OBJ_FLAG_HIDDEN);
         }
     }
 }
@@ -1560,11 +1611,11 @@ static void settings_update_off_controls_enabled(settings_ctx_t *ctx, bool enabl
         }
     }
 
-    if (!enabled && ctx->dt_keyboard) {
-        lv_obj_t *attached = lv_keyboard_get_textarea(ctx->dt_keyboard);
+    if (!enabled && ctx->ss_keyboard) {
+        lv_obj_t *attached = lv_keyboard_get_textarea(ctx->ss_keyboard);
         if (attached == ctx->ss_off_after_ta) {
-            lv_keyboard_set_textarea(ctx->dt_keyboard, NULL);
-            lv_obj_add_flag(ctx->dt_keyboard, LV_OBJ_FLAG_HIDDEN);
+            lv_keyboard_set_textarea(ctx->ss_keyboard, NULL);
+            lv_obj_add_flag(ctx->ss_keyboard, LV_OBJ_FLAG_HIDDEN);
         }
     }
 }
@@ -1929,7 +1980,7 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
         ctx->ss_off_after_lbl = NULL;
         ctx->ss_off_seconds_lbl = NULL;
         ctx->ss_off_after_ta = NULL;
-        ctx->dt_keyboard = NULL;
+        ctx->ss_keyboard = NULL;
     }
 
     lv_obj_t *overlay = lv_obj_create(lv_layer_top());
@@ -1938,7 +1989,7 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(overlay, LV_OPA_30, 0);
     lv_obj_add_flag(overlay, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
-    lv_obj_add_event_cb(overlay, settings_on_dt_background_tap, LV_EVENT_CLICKED, ctx);
+    lv_obj_add_event_cb(overlay, settings_on_ss_background_tap, LV_EVENT_CLICKED, ctx);
     ctx->screensaver_overlay = overlay;
 
     lv_obj_t *dlg = lv_obj_create(overlay);
@@ -2115,15 +2166,18 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_add_event_cb(cancel_btn, settings_close_screensaver, LV_EVENT_CLICKED, ctx);
 
     /* Keyboard anchored to bottom of overlay */
-    ctx->dt_keyboard = lv_keyboard_create(overlay);
-    lv_keyboard_set_mode(ctx->dt_keyboard, LV_KEYBOARD_MODE_NUMBER);
-    lv_keyboard_set_textarea(ctx->dt_keyboard, NULL);
-    lv_obj_add_flag(ctx->dt_keyboard, LV_OBJ_FLAG_FLOATING);
-    lv_obj_add_flag(ctx->dt_keyboard, LV_OBJ_FLAG_HIDDEN); /* show only after a field is tapped */
-    lv_obj_add_event_cb(ctx->dt_keyboard, settings_on_dt_background_tap, LV_EVENT_CLICKED, ctx);
-    lv_obj_add_event_cb(ctx->dt_keyboard, settings_on_dt_keyboard_event, LV_EVENT_CANCEL, ctx);
-    lv_obj_add_event_cb(ctx->dt_keyboard, settings_on_dt_keyboard_event, LV_EVENT_READY, ctx);
-    lv_obj_align(ctx->dt_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+    ctx->ss_keyboard = lv_keyboard_create(overlay);
+    lv_keyboard_set_mode(ctx->ss_keyboard, LV_KEYBOARD_MODE_NUMBER);
+    lv_keyboard_set_textarea(ctx->ss_keyboard, NULL);
+    lv_obj_add_flag(ctx->ss_keyboard, LV_OBJ_FLAG_FLOATING);
+    lv_obj_add_flag(ctx->ss_keyboard, LV_OBJ_FLAG_HIDDEN); /* show only after a field is tapped */
+    lv_obj_add_event_cb(ctx->ss_keyboard, settings_on_ss_background_tap, LV_EVENT_CLICKED, ctx);
+    lv_obj_add_event_cb(ctx->ss_keyboard, settings_on_ss_keyboard_event, LV_EVENT_CANCEL, ctx);
+    lv_obj_add_event_cb(ctx->ss_keyboard, settings_on_ss_keyboard_event, LV_EVENT_READY, ctx);
+    lv_obj_align(ctx->ss_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    settings_update_dim_controls_enabled(ctx, lv_obj_has_state(ctx->ss_dim_switch, LV_STATE_CHECKED));
+    settings_update_off_controls_enabled(ctx, lv_obj_has_state(ctx->ss_off_switch, LV_STATE_CHECKED));
 
     return ESP_OK;
 }
@@ -2148,7 +2202,7 @@ static void settings_apply_screensaver(lv_event_t *e)
         ctx->ss_off_after_lbl = NULL;
         ctx->ss_off_seconds_lbl = NULL;
         ctx->ss_off_after_ta = NULL;
-        ctx->dt_keyboard = NULL;
+        ctx->ss_keyboard = NULL;
     }  
 }
 
@@ -2172,6 +2226,6 @@ static void settings_close_screensaver(lv_event_t *e)
         ctx->ss_off_after_lbl = NULL;
         ctx->ss_off_seconds_lbl = NULL;
         ctx->ss_off_after_ta = NULL;
-        ctx->dt_keyboard = NULL;
+        ctx->ss_keyboard = NULL;
     }    
 }
