@@ -39,6 +39,7 @@
 #define SETTINGS_CALIBRATION_TASK_PRIO   (5)
 #define SETTINGS_DIM_FADE_MS             500
 #define SETTINGS_OFF_FADE_MS             500
+#define SETTINGS_UP_FADE_MS              250
 
 #define STR_HELPER(x)               #x
 #define STR(x)                      STR_HELPER(x)
@@ -106,6 +107,7 @@ static esp_timer_handle_t s_fade_timer = NULL;
 static int s_fade_target = 0;
 static int s_fade_steps_left = 0;
 static int s_fade_direction = 0;
+static bool s_wake_in_progress = false;
 
 /**
  * @brief Build the settings screen (header + scrollable settings list).
@@ -646,6 +648,14 @@ bool settings_is_time_valid()
     return s_settings_ctx.settings.time_valid == true;
 }
 
+void settings_fade_to_saved_brightness(void)
+{
+    int target = s_settings_ctx.settings.saved_brightness;
+    if (target < SETTINGS_MINIMUM_BRIGHTNESS) target = SETTINGS_MINIMUM_BRIGHTNESS;
+    if (target > 100) target = 100;
+    settings_fade_brightness(target, SETTINGS_UP_FADE_MS);
+}
+
 void settings_start_screensaver_timers(void)
 {
     bool dim_allowed = s_settings_ctx.settings.screen_dim &&
@@ -665,6 +675,15 @@ void settings_start_screensaver_timers(void)
     } else {
         screensaver_off_stop();
     }
+}
+
+int settings_get_active_brightness(void){
+    return s_settings_ctx.settings.brightness;
+}
+
+bool settings_is_wake_in_progress(void)
+{
+    return s_wake_in_progress;
 }
 
 static void settings_build_screen(settings_ctx_t *ctx)
@@ -883,7 +902,8 @@ static void settings_on_about(lv_event_t *e)
 
     const char *lines[] = {
         "Brightness: adjusts backlight between " STR(SETTINGS_MINIMUM_BRIGHTNESS) "\% and 100\%.",
-        "Run Touch Screen Calibration: starts the touch calibration wizard and saves the new calibration data.",
+        "Run Calibration: starts the touch calibration wizard and saves the new calibration data.",
+        "Screensaver: ",
         "Rotate Screen: rotates the display 90 degrees each time.",
         "Set Date/Time: opens the date/time picker to set clock values (MM/DD/YY HH:MM).",
         "Restart: reboots the device after saving system changes. Note: settings are also saved by simply leaving settings.",
@@ -925,6 +945,11 @@ static void settings_on_back(lv_event_t *e)
     {
         return;
     }
+
+    lv_obj_clean(ctx->screen);
+    ctx->active = false;
+    ctx->screen = NULL;
+
     settings_close(ctx);
 }
 
@@ -1911,11 +1936,19 @@ static void settings_fade_brightness(int target_pct, uint32_t duration_ms)
 
     settings_ctx_t *ctx = &s_settings_ctx;
     int start = ctx->settings.brightness;
+    bool rising = target_pct > start;
     if (duration_ms == 0 || start == target_pct) {
         ctx->settings.brightness = target_pct;
         bsp_display_brightness_set(target_pct);
         settings_sync_brightness_ui(ctx, target_pct);
+        if (!rising) {
+            s_wake_in_progress = false;
+        }
         return;
+    }
+
+    if (rising) {
+        s_wake_in_progress = true;
     }
 
     /* Stop existing fade timer */
@@ -1966,6 +1999,7 @@ static void settings_fade_step_cb(void *arg)
         bsp_display_brightness_set(s_fade_target);
         settings_sync_brightness_ui(&s_settings_ctx, s_fade_target);
         ESP_LOGI(TAG, "Fade complete -> %d", s_fade_target);
+        s_wake_in_progress = false;
         return;
     }
 
@@ -1990,10 +2024,15 @@ static void settings_sync_brightness_ui_async(void *arg)
     if (val > 100) val = 100;
 
     settings_ctx_t *ctx = &s_settings_ctx;
-    if (ctx->brightness_slider) {
+    /* Skip if settings screen is not active/visible or controls were deleted. */
+    if (!ctx->active || !ctx->screen || !lv_obj_is_valid(ctx->screen) || lv_screen_active() != ctx->screen) {
+        return;
+    }
+
+    if (ctx->brightness_slider && lv_obj_is_valid(ctx->brightness_slider)) {
         lv_slider_set_value(ctx->brightness_slider, val, LV_ANIM_OFF);
     }
-    if (ctx->brightness_label) {
+    if (ctx->brightness_label && lv_obj_is_valid(ctx->brightness_label)) {
         char txt[32];
         lv_snprintf(txt, sizeof(txt), "Brightness: %d%%", val);
         lv_label_set_text(ctx->brightness_label, txt);
@@ -2682,8 +2721,7 @@ static void settings_apply_screensaver(lv_event_t *e)
     /* Persist */
     persist_screensaver_to_nvs();
 
-    /* Start/stop timers */
-    //settings_start_screensaver_timers(ctx);
+    settings_start_screensaver_timers();
 
     settings_close_screensaver(e);
 }

@@ -59,7 +59,14 @@ void settings_shutdown_save_time(void);
  */
 bool settings_is_time_valid();
 
+/**
+ * @brief Fade brightness to saved_brightness over SETTINGS_UP_FADE_MS.
+ */
+void settings_fade_to_saved_brightness(void);
+
 void settings_start_screensaver_timers(void);
+bool settings_is_wake_in_progress(void);
+int settings_get_active_brightness(void);
 
 #ifdef __cplusplus
 }

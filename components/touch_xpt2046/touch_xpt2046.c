@@ -155,7 +155,7 @@ esp_lcd_touch_handle_t touch_get_handle(void)
 
 void touch_log_press(uint16_t x, uint16_t y)
 {
-    ESP_LOGI(TAG_TOUCH, "Touch press: x=%u y=%u", (unsigned)x, (unsigned)y);
+    ESP_LOGI(TAG_TOUCH, "\nTouch press: x=%u y=%u", (unsigned)x, (unsigned)y);
 }
 
 static lv_indev_t *register_touch_with_lvgl(void)
@@ -169,26 +169,37 @@ static lv_indev_t *register_touch_with_lvgl(void)
 
 static void lvgl_touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
+    if (!touch_handle){
+        return;
+    }
+
     uint16_t x, y;
     uint8_t btn = 0;
     bool pressed = false;
     static bool prev_pressed = false;
 
-    if (touch_handle)
+    if (esp_lcd_touch_read_data(touch_handle) == ESP_OK && esp_lcd_touch_get_coordinates(touch_handle, &x, &y, NULL, &btn, 1))
     {
-        if (esp_lcd_touch_read_data(touch_handle) == ESP_OK)
-        {
-            if (esp_lcd_touch_get_coordinates(touch_handle, &x, &y, NULL, &btn, 1))
-            {
-                pressed = true;
-                apply_touch_calibration(x, y, &data->point, TOUCH_X_MAX, TOUCH_Y_MAX);
+        if (settings_get_active_brightness() <= 0 || settings_is_wake_in_progress()) {
+            /* Wake screen but ignore this press for LVGL until fade-up completes */
+            if (!prev_pressed && settings_get_active_brightness() <= 0) {
+                settings_fade_to_saved_brightness();
+                settings_start_screensaver_timers();
             }
+            data->state = LV_INDEV_STATE_RELEASED;
+            prev_pressed = false;
+            (void)indev;
+            return;
+        } else {
+            pressed = true;
+            apply_touch_calibration(x, y, &data->point, TOUCH_X_MAX, TOUCH_Y_MAX);
         }
     }
 
     data->state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
     if (pressed && !prev_pressed) {
         touch_log_press(x, y);
+        settings_fade_to_saved_brightness();
         settings_start_screensaver_timers();
     }
     prev_pressed = pressed;
