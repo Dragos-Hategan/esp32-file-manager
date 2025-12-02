@@ -64,9 +64,27 @@ bool settings_is_time_valid();
  */
 void settings_fade_to_saved_brightness(void);
 
+/**
+ * @brief (Re)start dim/off timers according to current settings state.
+ */
 void settings_start_screensaver_timers(void);
+
+/**
+ * @brief Check if a wake fade (brightness ramp-up) is in progress.
+ * @return true if currently fading up from 0 toward saved_brightness.
+ */
 bool settings_is_wake_in_progress(void);
+
+/**
+ * @brief Get the current active brightness percentage.
+ * @return Brightness percent (0..100).
+ */
 int settings_get_active_brightness(void);
+
+/**
+ * @brief Get whether brightness/backlight is effectively on ( >0 ).
+ * @return true if brightness > 0, false otherwise.
+ */
 bool settings_get_brightness_state(void);
 
 #ifdef __cplusplus

@@ -64,7 +64,7 @@ typedef struct{
 
 typedef struct{
     bool active;                        /**< True while the settings screen is active */
-    bool changing_brightness;
+    bool changing_brightness;           /**< True while changing values to the brightness slider */
     lv_obj_t *return_screen;            /**< Screen to return to on close */
     lv_obj_t *screen;                   /**< Root LVGL screen object */
     lv_obj_t *toolbar;                  /**< Toolbar container */
