@@ -1953,7 +1953,6 @@ static void settings_fade_step_cb(void *arg)
     if (next > 100) next = 100;
     s_settings_ctx.settings.brightness = next;
     bsp_display_brightness_set(next);
-    settings_sync_brightness_ui(&s_settings_ctx, next);
     s_fade_steps_left--;
 }
 
