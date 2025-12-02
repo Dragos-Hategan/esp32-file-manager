@@ -57,6 +57,7 @@ typedef struct{
     lv_obj_t *restart_confirm_mbox;     /**< Active restart confirmation dialog (NULL when closed) */
     lv_obj_t *reset_confirm_mbox;       /**< Active reset confirmation dialog (NULL when closed) */
     lv_obj_t *datetime_overlay;         /**< Active date/time overlay (NULL when closed) */
+    lv_obj_t *screensaver_overlay;      /**< Active screensaver overlay (NULL when closed) */
     lv_obj_t *dt_month_ta;              /**< Month input (MM) */
     lv_obj_t *dt_day_ta;                /**< Day input (DD) */
     lv_obj_t *dt_year_ta;               /**< Year input (YY) */
@@ -64,6 +65,7 @@ typedef struct{
     lv_obj_t *dt_min_ta;                /**< Minute input (MM) */
     lv_obj_t *dt_keyboard;              /**< On-screen keyboard for date/time dialog */
     lv_obj_t *dt_dialog;                /**< Date/time dialog container */
+    lv_obj_t *screensaver_dialog;                /**< Date/time dialog container */
     lv_obj_t *dt_row_time;              /**< Time row container */
     settings_t settings;                /**< Information about the current session */
 }settings_ctx_t;
@@ -188,6 +190,11 @@ static void settings_close_reset(lv_event_t *e);
  * @param e LVGL event (CLICKED) with user data = settings_ctx_t*.
  */
 static void settings_run_calibration(lv_event_t *e);
+
+static void settings_screensaver(lv_event_t *e);
+static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx);
+static void settings_apply_screensaver(lv_event_t *e);
+static void settings_close_screensaver(lv_event_t *e);
 
 /**
  * @brief Background task to run touch calibration and restore UI state.
@@ -612,16 +619,35 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_snprintf(init_txt, sizeof(init_txt), "Brightness: %d%%", init_val);
     lv_label_set_text(ctx->brightness_label, init_txt);
 
-    lv_obj_t *calibration_button = lv_button_create(settings_list);
-    lv_obj_set_width(calibration_button, LV_PCT(100));
+    /* Row: Calibration + Screensaver */
+    lv_obj_t *row_actions0 = lv_obj_create(settings_list);
+    lv_obj_remove_style_all(row_actions0);
+    lv_obj_set_flex_flow(row_actions0, LV_FLEX_FLOW_ROW);
+    lv_obj_set_width(row_actions0, LV_PCT(100));
+    lv_obj_set_style_pad_gap(row_actions0, 6, 0);
+    lv_obj_set_style_pad_all(row_actions0, 0, 0);
+    lv_obj_set_height(row_actions0, LV_SIZE_CONTENT);    
+
+    lv_obj_t *calibration_button = lv_button_create(row_actions0);
+    lv_obj_set_flex_grow(calibration_button, 1);
     lv_obj_set_style_radius(calibration_button, 8, 0);
-    lv_obj_set_style_pad_all(calibration_button, 10, 0);    
+    lv_obj_set_style_pad_all(calibration_button, 10, 0); 
     lv_obj_add_event_cb(calibration_button, settings_run_calibration, LV_EVENT_CLICKED, ctx);
     lv_obj_set_style_align(calibration_button, LV_ALIGN_CENTER, 0);
     lv_obj_t *calibration_lbl = lv_label_create(calibration_button);
-    lv_label_set_text(calibration_lbl, "Run Touch Screen Calibration");
-    lv_obj_center(calibration_lbl);       
-
+    lv_label_set_text(calibration_lbl, "Screen Calibration");
+    lv_obj_center(calibration_lbl);    
+    
+    lv_obj_t *screen_saver_button = lv_button_create(row_actions0);
+    lv_obj_set_flex_grow(screen_saver_button, 1);
+    lv_obj_set_style_radius(screen_saver_button, 8, 0);
+    lv_obj_set_style_pad_all(screen_saver_button, 10, 0); 
+    lv_obj_add_event_cb(screen_saver_button, settings_screensaver, LV_EVENT_CLICKED, ctx);
+    lv_obj_set_style_align(screen_saver_button, LV_ALIGN_CENTER, 0);
+    lv_obj_t *screen_saver_lbl = lv_label_create(screen_saver_button);
+    lv_label_set_text(screen_saver_lbl, "Screensaver");
+    lv_obj_center(screen_saver_lbl);     
+    
     /* Row: Rotate + Set Date/Time */
     lv_obj_t *row_actions1 = lv_obj_create(settings_list);
     lv_obj_remove_style_all(row_actions1);
@@ -1637,11 +1663,7 @@ static void settings_reset_confirm(lv_event_t *e)
 
 static void settings_close_reset(lv_event_t *e)
 {
-    settings_ctx_t *ctx = lv_event_get_user_data(e);
-    if (!ctx || !ctx->reset_confirm_mbox)
-    {
-        return;
-    }    
+    settings_ctx_t *ctx = lv_event_get_user_data(e);  
     if (ctx && ctx->reset_confirm_mbox) {
         lv_msgbox_close(ctx->reset_confirm_mbox);
         ctx->reset_confirm_mbox = NULL;
@@ -1695,4 +1717,149 @@ static void settings_calibration_task(void *param)
     bsp_display_unlock();
     
     vTaskDelete(NULL);
+}
+
+static void settings_screensaver(lv_event_t *e)
+{
+    settings_ctx_t *ctx = lv_event_get_user_data(e);
+    if (ctx && ctx->screen)
+    {
+        settings_build_screensaver_dialog(ctx);
+    }
+}
+
+
+static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
+{
+    if (!ctx) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Close previous overlay if still open. */
+    if (ctx->screensaver_overlay) {
+        lv_obj_del(ctx->screensaver_overlay);
+        ctx->screensaver_overlay = NULL;
+        ctx->screensaver_dialog = NULL;
+    }
+
+    lv_obj_t *overlay = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(overlay);
+    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_30, 0);
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_add_event_cb(overlay, settings_on_dt_background_tap, LV_EVENT_CLICKED, ctx);
+    ctx->screensaver_overlay = overlay;
+
+    lv_obj_t *dlg = lv_obj_create(overlay);
+    lv_obj_set_style_radius(dlg, 12, 0);
+    lv_obj_set_style_pad_all(dlg, 12, 0);
+    lv_obj_set_style_pad_gap(dlg, 6, 0);
+    lv_obj_set_style_pad_bottom(dlg, 90, 0); /* leave room when keyboard appears */
+    lv_obj_set_size(dlg, lv_pct(82), lv_pct(70));
+    lv_obj_set_flex_flow(dlg, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(dlg, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_flag(dlg, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_flag(dlg, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_scroll_dir(dlg, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(dlg, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_add_event_cb(dlg, settings_on_dt_background_tap, LV_EVENT_CLICKED, ctx);
+    lv_obj_center(dlg);
+    ctx->screensaver_dialog = dlg;
+
+    lv_obj_t *title = lv_label_create(dlg);
+    lv_label_set_text(title, "Screensaver");
+    lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(title, LV_PCT(100));
+    lv_obj_add_flag(title, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    /* Dim row */
+    lv_obj_t *row_dim = lv_obj_create(dlg);
+    lv_obj_remove_style_all(row_dim);
+    lv_obj_set_flex_flow(row_dim, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_gap(row_dim, 4, 0);
+    lv_obj_set_style_pad_all(row_dim, 0, 0);
+    lv_obj_set_width(row_dim, LV_PCT(100));
+    lv_obj_set_height(row_dim, LV_SIZE_CONTENT);
+    lv_obj_set_flex_align(row_dim, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_flag(row_dim, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    lv_obj_t *dim_lbl = lv_label_create(row_dim);
+    lv_label_set_text(dim_lbl, "Dimming");
+    lv_obj_add_flag(dim_lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    /* Off row */
+    lv_obj_t *row_off = lv_obj_create(dlg);
+    lv_obj_remove_style_all(row_off);
+    lv_obj_set_flex_flow(row_off, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_gap(row_off, 4, 0);
+    lv_obj_set_style_pad_all(row_off, 0, 0);
+    lv_obj_set_width(row_off, LV_PCT(100));
+    lv_obj_set_height(row_off, LV_SIZE_CONTENT);
+    lv_obj_set_flex_align(row_off, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_flag(row_off, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    lv_obj_t *time_lbl = lv_label_create(row_off);
+    lv_label_set_text(time_lbl, "OFF");
+    lv_obj_add_flag(time_lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    /* Action row */
+    lv_obj_t *row_actions = lv_obj_create(dlg);
+    lv_obj_remove_style_all(row_actions);
+    lv_obj_set_flex_flow(row_actions, LV_FLEX_FLOW_ROW);
+    lv_obj_set_style_pad_gap(row_actions, 6, 0);
+    lv_obj_set_style_pad_all(row_actions, 0, 0);
+    lv_obj_set_width(row_actions, LV_PCT(100));
+    lv_obj_set_height(row_actions, LV_SIZE_CONTENT);
+    lv_obj_add_flag(row_actions, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+    lv_obj_t *apply_btn = lv_button_create(row_actions);
+    lv_obj_set_flex_grow(apply_btn, 1);
+    lv_obj_set_style_radius(apply_btn, 6, 0);
+    lv_obj_t *apply_lbl = lv_label_create(apply_btn);
+    lv_label_set_text(apply_lbl, "Apply");
+    lv_obj_center(apply_lbl);
+    lv_obj_add_flag(apply_lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_event_cb(apply_btn, settings_apply_screensaver, LV_EVENT_CLICKED, ctx);
+
+    lv_obj_t *cancel_btn = lv_button_create(row_actions);
+    lv_obj_set_flex_grow(cancel_btn, 1);
+    lv_obj_set_style_radius(cancel_btn, 6, 0);
+    lv_obj_t *cancel_lbl = lv_label_create(cancel_btn);
+    lv_label_set_text(cancel_lbl, "Cancel");
+    lv_obj_center(cancel_lbl);
+    lv_obj_add_flag(cancel_lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_event_cb(cancel_btn, settings_close_screensaver, LV_EVENT_CLICKED, ctx);
+
+    /* Keyboard anchored to bottom of overlay */
+    ctx->dt_keyboard = lv_keyboard_create(overlay);
+    lv_keyboard_set_mode(ctx->dt_keyboard, LV_KEYBOARD_MODE_NUMBER);
+    lv_keyboard_set_textarea(ctx->dt_keyboard, ctx->dt_month_ta);
+    lv_obj_add_flag(ctx->dt_keyboard, LV_OBJ_FLAG_FLOATING);
+    lv_obj_add_event_cb(ctx->dt_keyboard, settings_on_dt_background_tap, LV_EVENT_CLICKED, ctx);
+    lv_obj_add_event_cb(ctx->dt_keyboard, settings_on_dt_keyboard_event, LV_EVENT_CANCEL, ctx);
+    lv_obj_add_event_cb(ctx->dt_keyboard, settings_on_dt_keyboard_event, LV_EVENT_READY, ctx);
+    lv_obj_align(ctx->dt_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    return ESP_OK;
+}
+
+static void settings_apply_screensaver(lv_event_t *e)
+{
+    settings_ctx_t *ctx = lv_event_get_user_data(e);
+    if (ctx && ctx->screensaver_overlay) {
+        lv_obj_del(ctx->screensaver_overlay);
+        ctx->screensaver_overlay = NULL;
+        ctx->screensaver_dialog = NULL;
+    }  
+}
+
+static void settings_close_screensaver(lv_event_t *e)
+{
+    settings_ctx_t *ctx = lv_event_get_user_data(e); 
+    if (ctx && ctx->screensaver_overlay) {
+        lv_obj_del(ctx->screensaver_overlay);
+        ctx->screensaver_overlay = NULL;
+        ctx->screensaver_dialog = NULL;
+    }    
 }
