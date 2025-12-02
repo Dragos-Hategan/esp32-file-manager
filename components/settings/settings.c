@@ -976,7 +976,7 @@ static void settings_on_about(lv_event_t *e)
     const char *lines[] = {
         "Brightness: adjusts backlight between " STR(SETTINGS_MINIMUM_BRIGHTNESS) "\% and 100\%.",
         "Run Calibration: starts the touch calibration wizard and saves the new calibration data.",
-        "Screensaver: ",
+        "Screensaver: opens the screensaver configuration for dimming and turning the screen off.",
         "Rotate Screen: rotates the display 90 degrees each time.",
         "Set Date/Time: opens the date/time picker to set clock values (MM/DD/YY HH:MM).",
         "Restart: reboots the device after saving system changes. Note: settings are also saved by simply leaving settings.",
@@ -1310,7 +1310,7 @@ static void persist_screensaver_to_nvs(void)
     nvs_handle_t h;
     esp_err_t err = nvs_open(SETTINGS_NVS_NS, NVS_READWRITE, &h);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to open NVS for screensaver: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to open NVS for screensaver: (%s)", esp_err_to_name(err));
         return;
     }
 
@@ -1325,7 +1325,7 @@ static void persist_screensaver_to_nvs(void)
     nvs_close(h);
 
     if (res != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to save screensaver settings: %s", esp_err_to_name(res));
+        ESP_LOGE(TAG, "Failed to save screensaver settings: (%s)", esp_err_to_name(res));
     }
 }
 
