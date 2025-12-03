@@ -998,7 +998,7 @@ static void settings_on_about(lv_event_t *e)
     lv_obj_set_style_pad_all(ok_btn, 8, 0);
     lv_obj_set_style_align(ok_btn, LV_ALIGN_CENTER, 0);
     lv_obj_t *ok_lbl = lv_label_create(ok_btn);
-    lv_label_set_text(ok_lbl, "OK");
+    lv_label_set_text(ok_lbl, "Close");
     lv_obj_center(ok_lbl);
 
     lv_obj_add_event_cb(ok_btn, settings_on_about_close, LV_EVENT_CLICKED, overlay);
