@@ -1308,6 +1308,7 @@ static void file_browser_apply_window(file_browser_ctx_t *ctx, size_t start_inde
                 anchor_index = window_end - 1;
             }
             file_browser_scroll_to_entry(ctx, anchor_index, center_anchor);
+            lv_obj_scroll_to_y(ctx->list, lv_obj_get_scroll_bottom(ctx->list) / 2, LV_ANIM_OFF);
         }
     } else {
         if (scroll_to_top) {
@@ -1438,8 +1439,8 @@ static void file_browser_sync_view(file_browser_ctx_t *ctx)
     file_browser_reset_window(ctx);
     file_browser_update_path_label(ctx);
     file_browser_update_sort_badges(ctx);
-    file_browser_apply_window(ctx, ctx->list_window_start, SIZE_MAX, true, true);
     file_browser_update_second_header(ctx);
+    file_browser_apply_window(ctx, ctx->list_window_start, SIZE_MAX, true, true);
 }
 
 static bool check_second_header(file_browser_ctx_t *ctx)
