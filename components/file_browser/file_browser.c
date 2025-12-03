@@ -409,7 +409,7 @@ static void file_browser_on_parent_click(lv_event_t *e);
 static void file_browser_on_settings_click(lv_event_t *e);
 
 /**
- * @brief Tools dropdown handler (Sort / New TXT / New Folder).
+ * @brief Tools dropdown handler (New Folder / New TXT / Sort).
  *
  * @param e LVGL event (VALUE_CHANGED) with user data = @c file_browser_ctx_t*.
  */
@@ -1135,7 +1135,7 @@ static void file_browser_build_screen(file_browser_ctx_t *ctx)
     lv_obj_set_style_text_align(settings_lbl, LV_TEXT_ALIGN_CENTER, 0);
 
     ctx->tools_dd = lv_dropdown_create(main_header);
-    lv_dropdown_set_options_static(ctx->tools_dd, "Sort\nNew TXT\nNew Folder");
+    lv_dropdown_set_options_static(ctx->tools_dd, "New Folder\nNew TXT\nSort\n");
     lv_dropdown_set_selected(ctx->tools_dd, 0);
     lv_dropdown_set_text(ctx->tools_dd, "Tools");
     lv_obj_set_width(ctx->tools_dd, 70);
@@ -2075,11 +2075,9 @@ static void file_browser_on_tools_changed(lv_event_t *e)
     uint16_t sel = lv_dropdown_get_selected(dd);
 
     switch (sel) {
-        case 0: /* Sort */
-            file_browser_show_sort_dialog(ctx);
-            break;
-        case 1: file_browser_start_new_txt(ctx); break;
-        case 2: file_browser_start_new_folder(ctx); break;
+        case 0: file_browser_start_new_folder(ctx); break;
+        case 1: file_browser_start_new_txt(ctx);    break;
+        case 2: file_browser_show_sort_dialog(ctx); break;
         default: break;
     }
 
@@ -2309,7 +2307,8 @@ static void file_browser_show_folder_dialog(file_browser_ctx_t *ctx)
     lv_obj_t *overlay = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(overlay);
     lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_opa(overlay, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_30, 0);
     lv_obj_add_flag(overlay, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
     ctx->folder_dialog = overlay;
 
@@ -3555,7 +3554,8 @@ static void file_browser_show_rename_dialog(file_browser_ctx_t *ctx)
     lv_obj_t *overlay = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(overlay);
     lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
-    lv_obj_set_style_bg_opa(overlay, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_30, 0);
     lv_obj_add_flag(overlay, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
     ctx->rename_dialog = overlay;
 

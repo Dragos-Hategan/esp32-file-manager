@@ -2546,7 +2546,7 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_set_style_pad_all(row_dim, 0, 0);
     lv_obj_set_width(row_dim, LV_PCT(100));
     lv_obj_set_height(row_dim, LV_SIZE_CONTENT);
-    lv_obj_set_flex_align(row_dim, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(row_dim, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(row_dim, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     lv_obj_t *dim_lbl = lv_label_create(row_dim);
@@ -2572,7 +2572,7 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_set_style_pad_all(row_dim_cfg, 0, 0);
     lv_obj_set_width(row_dim_cfg, LV_PCT(100));
     lv_obj_set_height(row_dim_cfg, LV_SIZE_CONTENT);
-    lv_obj_set_flex_align(row_dim_cfg, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(row_dim_cfg, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(row_dim_cfg, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     lv_obj_t *dim_after_lbl = lv_label_create(row_dim_cfg);
@@ -2645,7 +2645,7 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_set_style_pad_all(row_off, 0, 0);
     lv_obj_set_width(row_off, LV_PCT(100));
     lv_obj_set_height(row_off, LV_SIZE_CONTENT);
-    lv_obj_set_flex_align(row_off, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(row_off, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(row_off, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     lv_obj_t *time_lbl = lv_label_create(row_off);
@@ -2671,7 +2671,7 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_set_style_pad_all(row_off_cfg, 0, 0);
     lv_obj_set_width(row_off_cfg, LV_PCT(100));
     lv_obj_set_height(row_off_cfg, LV_SIZE_CONTENT);
-    lv_obj_set_flex_align(row_off_cfg, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(row_off_cfg, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_add_flag(row_off_cfg, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     lv_obj_t *off_after_lbl = lv_label_create(row_off_cfg);
