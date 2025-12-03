@@ -1825,7 +1825,6 @@ static void settings_update_dim_controls_enabled(settings_ctx_t *ctx, bool enabl
     }
 
     lv_obj_t *labels[] = {
-        ctx->ss_dim_lbl,
         ctx->ss_dim_after_lbl,
         ctx->ss_seconds_lbl,
         ctx->ss_at_lbl,
@@ -1838,8 +1837,10 @@ static void settings_update_dim_controls_enabled(settings_ctx_t *ctx, bool enabl
         }
         if (enabled) {
             lv_obj_clear_state(lbl, LV_STATE_DISABLED);
+            lv_obj_set_style_text_opa(lbl, LV_OPA_COVER, LV_PART_MAIN);
         } else {
             lv_obj_add_state(lbl, LV_STATE_DISABLED);
+            lv_obj_set_style_text_opa(lbl, LV_OPA_60, LV_PART_MAIN);
         }
     }
 
@@ -1854,6 +1855,7 @@ static void settings_update_dim_controls_enabled(settings_ctx_t *ctx, bool enabl
         }
         if (enabled) {
             lv_obj_clear_state(ta, LV_STATE_DISABLED);
+            lv_obj_set_style_text_opa(ta, LV_OPA_COVER, LV_PART_MAIN);
             /* If empty, restore from placeholder so last value shows when re-enabled. */
             const char *txt = lv_textarea_get_text(ta);
             const char *ph = lv_textarea_get_placeholder_text(ta);
@@ -1862,6 +1864,7 @@ static void settings_update_dim_controls_enabled(settings_ctx_t *ctx, bool enabl
             }
         } else {
             lv_obj_add_state(ta, LV_STATE_DISABLED);
+            lv_obj_set_style_text_opa(ta, LV_OPA_60, LV_PART_MAIN);
             /* Clear text so placeholder (last known value) is visible while disabled. */
             lv_textarea_set_text(ta, "");
         }
@@ -1883,7 +1886,6 @@ static void settings_update_off_controls_enabled(settings_ctx_t *ctx, bool enabl
     }
 
     lv_obj_t *labels[] = {
-        ctx->ss_off_lbl,
         ctx->ss_off_after_lbl,
         ctx->ss_off_seconds_lbl,
     };
@@ -1894,14 +1896,17 @@ static void settings_update_off_controls_enabled(settings_ctx_t *ctx, bool enabl
         }
         if (enabled) {
             lv_obj_clear_state(lbl, LV_STATE_DISABLED);
+            lv_obj_set_style_text_opa(lbl, LV_OPA_COVER, LV_PART_MAIN);
         } else {
             lv_obj_add_state(lbl, LV_STATE_DISABLED);
+            lv_obj_set_style_text_opa(lbl, LV_OPA_60, LV_PART_MAIN);
         }
     }
 
     if (ctx->ss_off_after_ta) {
         if (enabled) {
             lv_obj_clear_state(ctx->ss_off_after_ta, LV_STATE_DISABLED);
+            lv_obj_set_style_text_opa(ctx->ss_off_after_ta, LV_OPA_COVER, LV_PART_MAIN);
             const char *txt = lv_textarea_get_text(ctx->ss_off_after_ta);
             const char *ph = lv_textarea_get_placeholder_text(ctx->ss_off_after_ta);
             if (txt && txt[0] == '\0' && ph && ph[0] != '\0') {
@@ -1909,6 +1914,7 @@ static void settings_update_off_controls_enabled(settings_ctx_t *ctx, bool enabl
             }
         } else {
             lv_obj_add_state(ctx->ss_off_after_ta, LV_STATE_DISABLED);
+            lv_obj_set_style_text_opa(ctx->ss_off_after_ta, LV_OPA_60, LV_PART_MAIN);
             lv_textarea_set_text(ctx->ss_off_after_ta, "");
         }
     }
@@ -2557,11 +2563,6 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
 
     lv_obj_t *dim_switch = lv_switch_create(row_dim);
     lv_obj_set_style_pad_all(dim_switch, 4, 0);
-    if (ctx->settings.screen_dim) {
-        lv_obj_add_state(dim_switch, LV_STATE_CHECKED);
-    } else {
-        lv_obj_clear_state(dim_switch, LV_STATE_CHECKED);
-    }
     lv_obj_add_event_cb(dim_switch, settings_on_dim_switch_changed, LV_EVENT_VALUE_CHANGED, ctx);
     ctx->ss_dim_switch = dim_switch;
 
@@ -2638,6 +2639,20 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_add_flag(pct_lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
     ctx->ss_pct_lbl = pct_lbl;
 
+    if (ctx->settings.screen_dim) {
+        lv_obj_add_state(dim_switch, LV_STATE_CHECKED);
+        lv_obj_add_state(dim_after_lbl, LV_STATE_DISABLED);
+        lv_obj_add_state(seconds_lbl, LV_STATE_DISABLED);
+        lv_obj_add_state(at_lbl, LV_STATE_DISABLED);
+        lv_obj_add_state(pct_lbl, LV_STATE_DISABLED);        
+    } else {
+        lv_obj_clear_state(dim_switch, LV_STATE_CHECKED);
+        lv_obj_clear_state(dim_after_lbl, LV_STATE_DISABLED);
+        lv_obj_clear_state(seconds_lbl, LV_STATE_DISABLED);
+        lv_obj_clear_state(at_lbl, LV_STATE_DISABLED);
+        lv_obj_clear_state(pct_lbl, LV_STATE_DISABLED);        
+    }
+
     /* Off row */
     lv_obj_t *row_off = lv_obj_create(dlg);
     lv_obj_remove_style_all(row_off);
@@ -2650,17 +2665,12 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_add_flag(row_off, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     lv_obj_t *time_lbl = lv_label_create(row_off);
-    lv_label_set_text(time_lbl, "Turn OFF");
+    lv_label_set_text(time_lbl, "Screen OFF");
     lv_obj_add_flag(time_lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
     ctx->ss_off_lbl = time_lbl;
 
     lv_obj_t *off_switch = lv_switch_create(row_off);
     lv_obj_set_style_pad_all(off_switch, 4, 0);
-    if (ctx->settings.screen_off) {
-        lv_obj_add_state(off_switch, LV_STATE_CHECKED);
-    } else {
-        lv_obj_clear_state(off_switch, LV_STATE_CHECKED);
-    }
     lv_obj_add_event_cb(off_switch, settings_on_off_switch_changed, LV_EVENT_VALUE_CHANGED, ctx);
     ctx->ss_off_switch = off_switch;
 
@@ -2744,6 +2754,16 @@ static esp_err_t settings_build_screensaver_dialog(settings_ctx_t *ctx)
     lv_obj_add_event_cb(ctx->ss_keyboard, settings_on_ss_keyboard_event, LV_EVENT_CANCEL, ctx);
     lv_obj_add_event_cb(ctx->ss_keyboard, settings_on_ss_keyboard_event, LV_EVENT_READY, ctx);
     lv_obj_align(ctx->ss_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    if (ctx->settings.screen_off) {
+        lv_obj_add_state(off_switch, LV_STATE_CHECKED);
+        lv_obj_add_state(off_after_lbl, LV_STATE_DISABLED);
+        lv_obj_add_state(off_seconds_lbl, LV_STATE_DISABLED);     
+    } else {
+        lv_obj_clear_state(off_switch, LV_STATE_CHECKED);
+        lv_obj_clear_state(off_after_lbl, LV_STATE_DISABLED);
+        lv_obj_clear_state(off_seconds_lbl, LV_STATE_DISABLED);       
+    }
 
     settings_update_dim_controls_enabled(ctx, lv_obj_has_state(ctx->ss_dim_switch, LV_STATE_CHECKED));
     settings_update_off_controls_enabled(ctx, lv_obj_has_state(ctx->ss_off_switch, LV_STATE_CHECKED));
