@@ -118,6 +118,9 @@ lv_obj_t * lv_msgbox_create(lv_obj_t * parent)
         lv_obj_class_init_obj(parent);
         lv_obj_remove_flag(parent, LV_OBJ_FLAG_IGNORE_LAYOUT);
         lv_obj_set_size(parent, LV_PCT(100), LV_PCT(100));
+        lv_obj_set_style_bg_color(parent, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(parent, LV_OPA_30, 0);
+        lv_obj_add_flag(parent, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
     }
 
     lv_obj_t * obj = lv_obj_class_create_obj(&lv_msgbox_class, parent);
