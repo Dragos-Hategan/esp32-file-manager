@@ -1380,16 +1380,15 @@ static void file_browser_wait_for_reconnection_task(void* arg)
             restart_required = true;
         }
     }
-
-    file_browser_wait_task = NULL;
-
+    
     if (restart_required) {
         if (settings_is_time_valid()){
             settings_shutdown_save_time();
         }
         esp_restart();
     }
-
+    
+    file_browser_wait_task = NULL;
     vTaskDelete(NULL);
 }
 

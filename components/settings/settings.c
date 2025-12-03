@@ -913,6 +913,16 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_obj_set_style_pad_all(row_actions2, 0, 0);
     lv_obj_set_height(row_actions2, LV_SIZE_CONTENT);
 
+    lv_obj_t *reset_button = lv_button_create(row_actions2);
+    lv_obj_set_flex_grow(reset_button, 1);
+    lv_obj_set_style_radius(reset_button, 8, 0);
+    lv_obj_set_style_pad_all(reset_button, 10, 0);    
+    lv_obj_add_event_cb(reset_button, settings_reset, LV_EVENT_CLICKED, ctx);
+    lv_obj_set_style_align(reset_button, LV_ALIGN_CENTER, 0);
+    lv_obj_t *reset_lbl = lv_label_create(reset_button);
+    lv_label_set_text(reset_lbl, "Reset");
+    lv_obj_center(reset_lbl);  
+
     lv_obj_t *restart_button = lv_button_create(row_actions2);
     lv_obj_set_flex_grow(restart_button, 1);
     lv_obj_set_style_radius(restart_button, 8, 0);
@@ -922,16 +932,6 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_obj_t *restart_lbl = lv_label_create(restart_button);
     lv_label_set_text(restart_lbl, "Restart");
     lv_obj_center(restart_lbl);
-
-    lv_obj_t *reset_button = lv_button_create(row_actions2);
-    lv_obj_set_flex_grow(reset_button, 1);
-    lv_obj_set_style_radius(reset_button, 8, 0);
-    lv_obj_set_style_pad_all(reset_button, 10, 0);    
-    lv_obj_add_event_cb(reset_button, settings_reset, LV_EVENT_CLICKED, ctx);
-    lv_obj_set_style_align(reset_button, LV_ALIGN_CENTER, 0);
-    lv_obj_t *reset_lbl = lv_label_create(reset_button);
-    lv_label_set_text(reset_lbl, "Reset");
-    lv_obj_center(reset_lbl);       
 }
 
 static void settings_on_about(lv_event_t *e)
@@ -1019,10 +1019,6 @@ static void settings_on_back(lv_event_t *e)
         return;
     }
 
-    lv_obj_clean(ctx->screen);
-    ctx->active = false;
-    ctx->screen = NULL;
-
     settings_start_screensaver_timers();
     settings_close(ctx);
 }
@@ -1049,6 +1045,9 @@ static void settings_close(settings_ctx_t *ctx)
     {
         lv_screen_load(ctx->return_screen);
     }    
+    lv_obj_del(ctx->screen);
+    ctx->active = false;
+    ctx->screen = NULL;
 }
 
 static esp_err_t init_nvs(void)
@@ -2417,8 +2416,6 @@ static void settings_run_calibration(lv_event_t *e)
     }
 
     lv_obj_clean(ctx->screen);
-    ctx->active = false;
-    ctx->screen = NULL;
 
     /* Run calibration asynchronously to avoid blocking the LVGL task/UI thread. */
     xTaskCreate(settings_calibration_task,
@@ -2445,6 +2442,7 @@ static void settings_calibration_task(void *param)
         apply_rotation_to_display(true);
     }
 
+    /* Stop Screensaver While Performing Calibration*/
     bsp_display_brightness_set(100);
     screensaver_dim_stop();
     screensaver_off_stop();
@@ -2454,8 +2452,11 @@ static void settings_calibration_task(void *param)
 
     ctx->settings.screen_rotation_step = prev_rotation;
     apply_rotation_to_display(true);
-    
+
     bsp_display_lock(0);
+    lv_obj_del(ctx->screen);
+    ctx->active = false;
+    ctx->screen = NULL;
     settings_open_settings(ctx->return_screen);
     bsp_display_unlock();
     
