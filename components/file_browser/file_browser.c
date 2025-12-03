@@ -1927,7 +1927,9 @@ static void file_browser_on_entry_click(lv_event_t *e)
                 .return_screen = ctx->screen,
                 .editable = false,
             };
+            file_browser_show_loading(ctx);
             esp_err_t err = text_viewer_open(&opts);
+            file_browser_hide_loading(ctx);
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to view \"%s\": %s", entry->name, esp_err_to_name(err));
                 sdspi_schedule_sd_retry();
@@ -3457,11 +3459,13 @@ static void file_browser_on_delete_confirm(lv_event_t *e)
         return;
     }
 
+    file_browser_show_loading(ctx);
     esp_err_t err = file_browser_delete_selected_entry(ctx);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Delete failed: %s", esp_err_to_name(err));
         sdspi_schedule_sd_retry();
     }
+    file_browser_hide_loading(ctx);
 }
 
 static esp_err_t file_browser_delete_selected_entry(file_browser_ctx_t *ctx)
