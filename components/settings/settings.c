@@ -774,7 +774,7 @@ static void settings_build_screen(settings_ctx_t *ctx)
     lv_obj_set_size(toolbar, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(toolbar, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_gap(toolbar, 3, 0);
-    lv_obj_set_flex_align(toolbar, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_flex_align(toolbar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     ctx->toolbar = toolbar;    
 
     lv_obj_t *back_btn = lv_button_create(toolbar);
