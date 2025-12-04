@@ -55,6 +55,7 @@ typedef struct
     lv_obj_t *save_btn;                         /**< Save button (hidden/disabled in view mode) */
     lv_obj_t *text_area;                        /**< Text area for viewing/editing content */
     lv_obj_t *keyboard;                         /**< On-screen keyboard */
+    lv_obj_t *chunk_slider;                     /**< Vertical slider for chunk navigation */
     lv_obj_t *return_screen;                    /**< Screen to return to on close */
     lv_obj_t *confirm_mbox;                     /**< Confirmation message box (save/discard) */
     lv_obj_t *chunk_mbox;                       /**< Chunk-change confirmation message box */
@@ -75,6 +76,9 @@ typedef struct
     bool waiting_sd;                            /**< True while waiting SD reconnection */
     text_viewer_sd_action_t sd_retry_action;    /**< Pending action after SD reconnect */
     bool content_changed;                       /**< True if file was saved during session */
+    bool slider_suppress_change;                /**< Guard slider callbacks while syncing */
+    bool slider_drag_active;                    /**< True while slider knob is dragged */
+    size_t slider_pending_step;                 /**< Pending slider step during drag */
 } text_viewer_ctx_t;
 
 /**
@@ -165,6 +169,9 @@ static void text_viewer_path_scroll_timer_cb(lv_timer_t *timer);
  * @param text New baseline text (may be NULL, which clears the snapshot).
  */
 static void text_viewer_set_original(text_viewer_ctx_t *ctx, const char *text);
+static void text_viewer_get_slider_params(text_viewer_ctx_t *ctx, size_t *window_size, size_t *step);
+static void text_viewer_update_slider(text_viewer_ctx_t *ctx);
+static void text_viewer_on_slider_value_changed(lv_event_t *e);
 
 /**
  * @brief Load two consecutive chunks into the textarea and position the cursor at the boundary.
@@ -600,6 +607,9 @@ esp_err_t text_viewer_open(const text_viewer_open_opts_t *opts)
     ctx->waiting_sd = false;
     ctx->sd_retry_action = TEXT_VIEWER_SD_NONE;
     ctx->content_changed = false;
+    ctx->slider_suppress_change = false;
+    ctx->slider_drag_active = false;
+    ctx->slider_pending_step = SIZE_MAX;
 
     if (new_file)
     {
@@ -629,6 +639,7 @@ esp_err_t text_viewer_open(const text_viewer_open_opts_t *opts)
         text_viewer_set_status(ctx, ctx->editable ? "Edit mode" : "View mode");
     }
     text_viewer_apply_mode(ctx);
+    text_viewer_update_slider(ctx);
     lv_screen_load(ctx->screen);
     if (ctx->new_file)
     {
@@ -743,6 +754,7 @@ static void text_viewer_build_screen(text_viewer_ctx_t *ctx)
     lv_obj_set_style_pad_bottom(list_slider, 0, 0);
     lv_obj_set_style_pad_left(list_slider, 0, 0);
     lv_obj_set_style_pad_right(list_slider, 0, 0);
+    lv_obj_set_style_translate_y(list_slider, 2, 0);
     lv_obj_set_style_bg_color(list_slider, lv_color_hex(0x1f2933), 0);
     lv_obj_set_style_bg_opa(list_slider, LV_OPA_60, 0);
     lv_obj_set_style_radius(list_slider, 8, 0);
@@ -756,6 +768,12 @@ static void text_viewer_build_screen(text_viewer_ctx_t *ctx)
     lv_obj_set_style_radius(list_slider, 6, LV_PART_KNOB);
     lv_obj_set_style_width(list_slider, 12, LV_PART_KNOB);
     lv_obj_set_style_height(list_slider, 12, LV_PART_KNOB);
+    lv_obj_add_event_cb(list_slider, text_viewer_on_slider_value_changed, LV_EVENT_PRESSED, ctx);
+    lv_obj_add_event_cb(list_slider, text_viewer_on_slider_value_changed, LV_EVENT_VALUE_CHANGED, ctx);
+    lv_obj_add_event_cb(list_slider, text_viewer_on_slider_value_changed, LV_EVENT_RELEASED, ctx);
+    lv_obj_add_event_cb(list_slider, text_viewer_on_slider_value_changed, LV_EVENT_PRESS_LOST, ctx);
+    lv_obj_clear_flag(list_slider, LV_OBJ_FLAG_SCROLL_CHAIN);
+    ctx->chunk_slider = list_slider;
     
     ctx->keyboard = lv_keyboard_create(scr);
     lv_keyboard_set_textarea(ctx->keyboard, ctx->text_area);
@@ -865,6 +883,165 @@ static void text_viewer_set_original(text_viewer_ctx_t *ctx, const char *text)
 {
     free(ctx->original_text);
     ctx->original_text = text ? strdup(text) : NULL;
+}
+
+static void text_viewer_get_slider_params(text_viewer_ctx_t *ctx, size_t *window_size, size_t *step)
+{
+    (void)ctx;
+    if (!window_size || !step) {
+        return;
+    }
+    *window_size = 2; /* two adjacent chunks = one window */
+    *step = 1;        /* one chunk per step */
+}
+
+static void text_viewer_update_slider(text_viewer_ctx_t *ctx)
+{
+    if (!ctx || !ctx->chunk_slider) {
+        return;
+    }
+
+    size_t window_size = 1;
+    size_t step = 1;
+    text_viewer_get_slider_params(ctx, &window_size, &step);
+
+    size_t total_chunks = ctx->max_file_offset_kb + 1; /* offsets are in KB chunks */
+    if (total_chunks == 0) {
+        total_chunks = 1;
+    }
+
+    if (total_chunks <= window_size) {
+        bool prev = ctx->slider_suppress_change;
+        ctx->slider_suppress_change = true;
+        lv_slider_set_range(ctx->chunk_slider, 0, 0);
+        lv_slider_set_value(ctx->chunk_slider, 0, LV_ANIM_OFF);
+        ctx->slider_suppress_change = prev;
+        ctx->slider_pending_step = 0;
+        ctx->slider_drag_active = false;
+        lv_obj_add_state(ctx->chunk_slider, LV_STATE_DISABLED);
+        return;
+    }
+
+    size_t max_start = total_chunks - window_size;
+    size_t max_step_index = step ? ((max_start + step - 1) / step) : 0;
+    int32_t max_val = (int32_t)max_step_index;
+
+    size_t current_start = ctx->lasf_file_offset_kb;
+    if (current_start > max_start) {
+        current_start = max_start;
+    }
+    size_t current_step = step ? (current_start / step) : 0;
+    if (current_step > max_step_index) {
+        current_step = max_step_index;
+    }
+
+    bool prev = ctx->slider_suppress_change;
+    ctx->slider_suppress_change = true;
+    lv_slider_set_range(ctx->chunk_slider, max_val, 0); /* min at top, max at bottom */
+    lv_slider_set_value(ctx->chunk_slider, (int32_t)current_step, LV_ANIM_OFF);
+    ctx->slider_suppress_change = prev;
+    ctx->slider_pending_step = current_step;
+    lv_obj_remove_state(ctx->chunk_slider, LV_STATE_DISABLED);
+}
+
+static void text_viewer_on_slider_value_changed(lv_event_t *e)
+{
+    text_viewer_ctx_t *ctx = lv_event_get_user_data(e);
+    if (!ctx || ctx->slider_suppress_change) {
+        return;
+    }
+
+    lv_event_code_t code = lv_event_get_code(e);
+    bool blocked = ctx->waiting_sd || ctx->chunk_mbox || ctx->pending_chunk;
+
+    size_t window_size = 1;
+    size_t step = 1;
+    text_viewer_get_slider_params(ctx, &window_size, &step);
+    size_t total_chunks = ctx->max_file_offset_kb + 1;
+    if (total_chunks == 0) {
+        total_chunks = 1;
+    }
+    if (total_chunks <= window_size) {
+        return; /* Nothing to scroll */
+    }
+
+    size_t max_start = total_chunks - window_size;
+    size_t max_step_index = step ? ((max_start + step - 1) / step) : 0;
+
+    int32_t slider_val = lv_slider_get_value(lv_event_get_target(e));
+    if (slider_val < 0) {
+        slider_val = 0;
+    }
+
+    size_t clamped_step = (size_t)slider_val;
+    if (clamped_step > max_step_index) {
+        clamped_step = max_step_index;
+    }
+
+    if (code == LV_EVENT_PRESSED) {
+        if (blocked) {
+            return;
+        }
+        ctx->slider_drag_active = true;
+        ctx->slider_pending_step = clamped_step;
+        return;
+    }
+
+    if (code == LV_EVENT_VALUE_CHANGED) {
+        if (blocked) {
+            return;
+        }
+        ctx->slider_pending_step = clamped_step;
+        return;
+    }
+
+    if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        if (blocked) {
+            ctx->slider_pending_step = SIZE_MAX;
+            ctx->slider_drag_active = false;
+            text_viewer_update_slider(ctx);
+            return;
+        }
+
+        size_t target_step = (ctx->slider_pending_step != SIZE_MAX) ? ctx->slider_pending_step : clamped_step;
+        if (target_step > max_step_index) {
+            target_step = max_step_index;
+        }
+
+        size_t current_start = ctx->lasf_file_offset_kb;
+        if (current_start > max_start) {
+            current_start = max_start;
+        }
+        size_t current_step = step ? (current_start / step) : 0;
+        if (current_step > max_step_index) {
+            current_step = max_step_index;
+        }
+
+        if (target_step == current_step) {
+            ctx->slider_pending_step = SIZE_MAX;
+            ctx->slider_drag_active = false;
+            return;
+        }
+
+        size_t new_start = (target_step >= max_step_index) ? max_start : (target_step * step);
+        if (new_start > max_start) {
+            new_start = max_start;
+        }
+
+        size_t first_offset = new_start;
+        size_t second_offset = first_offset + (window_size > 1 ? (window_size - 1) : 0);
+        if (second_offset > ctx->max_file_offset_kb) {
+            second_offset = ctx->max_file_offset_kb;
+        }
+        if (window_size > 1 && second_offset == first_offset && first_offset > 0) {
+            first_offset -= 1;
+        }
+
+        bool from_top = target_step < current_step;
+        ctx->slider_pending_step = SIZE_MAX;
+        ctx->slider_drag_active = false;
+        text_viewer_request_chunk_load(ctx, first_offset, second_offset, from_top);
+    }
 }
 
 static esp_err_t text_viewer_load_window(text_viewer_ctx_t *ctx, size_t first_offset_kb, size_t second_offset_kb)
@@ -1357,6 +1534,7 @@ static void text_viewer_handle_save(text_viewer_ctx_t *ctx)
     ctx->dirty = false;
     ctx->content_changed = true;
     text_viewer_set_status(ctx, "Saved");
+    text_viewer_update_slider(ctx);
     return;
 
 save_cleanup:
@@ -1465,6 +1643,7 @@ static void text_viewer_apply_pending_chunk(text_viewer_ctx_t *ctx)
         ctx->current_file_offset_kb = ctx->pending_second_offset_kb;
         ctx->at_top_edge = false;
         ctx->at_bottom_edge = false;
+        text_viewer_update_slider(ctx);
     }
     else
     {
@@ -1499,6 +1678,7 @@ static void text_viewer_on_chunk_prompt(lv_event_t *e)
             ctx->pending_chunk = false;
             ctx->at_top_edge = false;
             ctx->at_bottom_edge = false;
+            text_viewer_update_slider(ctx);
         }
     }
     else if (ud == (void *)TEXT_VIEWER_CHUNK_DISCARD)
@@ -1512,6 +1692,7 @@ static void text_viewer_on_chunk_prompt(lv_event_t *e)
         ctx->pending_chunk = false; // Cancel
         ctx->at_top_edge = false;
         ctx->at_bottom_edge = false;
+        text_viewer_update_slider(ctx);
     }
 }
 
@@ -1916,6 +2097,7 @@ static void text_viewer_close(text_viewer_ctx_t *ctx, bool changed)
         ctx->save_btn = NULL;
         ctx->text_area = NULL;
         ctx->keyboard = NULL;
+        ctx->chunk_slider = NULL;
     }
     free(ctx->original_text);
     ctx->original_text = NULL;
