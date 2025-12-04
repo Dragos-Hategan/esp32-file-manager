@@ -169,8 +169,32 @@ static void text_viewer_path_scroll_timer_cb(lv_timer_t *timer);
  * @param text New baseline text (may be NULL, which clears the snapshot).
  */
 static void text_viewer_set_original(text_viewer_ctx_t *ctx, const char *text);
+
+/**
+ * @brief Resolve slider window size and step (in KB chunks) with defaults.
+ *
+ * @param[in]  ctx          Viewer context (currently unused).
+ * @param[out] window_size  Effective window size (chunks per window, >=1).
+ * @param[out] step         Effective step size (chunks per step, >=1).
+ */
 static void text_viewer_get_slider_params(text_viewer_ctx_t *ctx, size_t *window_size, size_t *step);
+/**
+ * @brief Sync the chunk slider with the current window and file size.
+ *
+ * Updates range/value, snaps to the active window (including the last), disables when
+ * a single window fits, and stores the pending step for drag handling.
+ *
+ * @param[in,out] ctx Viewer context containing slider state.
+ */
 static void text_viewer_update_slider(text_viewer_ctx_t *ctx);
+/**
+ * @brief Handle slider press/drag/release to jump between chunk windows.
+ *
+ * Tracks the target step while dragging and applies the chunk load on release; no-ops
+ * if blocked or if the knob returns to the current step.
+ *
+ * @param e LVGL slider event with user data = text_viewer_ctx_t*.
+ */
 static void text_viewer_on_slider_value_changed(lv_event_t *e);
 
 /**
