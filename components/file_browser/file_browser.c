@@ -1376,15 +1376,30 @@ static void file_browser_update_slider(file_browser_ctx_t *ctx)
     size_t step = 1;
     file_browser_get_window_params(ctx, &window_size, &step);
     size_t total = fs_nav_total_items(&ctx->nav);
-    size_t step_count = step ? ((total + step - 1) / step) : 1;
-    if (step_count == 0) {
-        step_count = 1;
+
+    /* If everything fits in one window, lock the slider at start. */
+    if (total <= window_size) {
+        bool prev_suppress = ctx->slider_suppress_change;
+        ctx->slider_suppress_change = true;
+        lv_slider_set_range(ctx->list_slider, 0, 0);
+        lv_slider_set_value(ctx->list_slider, 0, LV_ANIM_OFF);
+        ctx->slider_suppress_change = prev_suppress;
+        lv_obj_add_state(ctx->list_slider, LV_STATE_DISABLED);
+        return;
     }
 
-    int32_t max_val = (int32_t)(step_count - 1);
-    size_t current_step = step ? (ctx->list_window_start / step) : 0;
-    if (current_step > (size_t)max_val) {
-        current_step = (size_t)max_val;
+    size_t max_start = total - window_size;
+    size_t max_step_index = step ? ((max_start + step - 1) / step) : 0;
+    int32_t max_val = (int32_t)max_step_index;
+
+    size_t current_step = 0;
+    if (ctx->list_window_start >= max_start) {
+        current_step = max_step_index; /* force knob to bottom when at last window */
+    } else {
+        current_step = step ? (ctx->list_window_start / step) : 0;
+        if (current_step > (size_t)max_val) {
+            current_step = (size_t)max_val;
+        }
     }
 
     bool prev_suppress = ctx->slider_suppress_change;
@@ -1393,11 +1408,7 @@ static void file_browser_update_slider(file_browser_ctx_t *ctx)
     lv_slider_set_value(ctx->list_slider, (int32_t)current_step, LV_ANIM_OFF);
     ctx->slider_suppress_change = prev_suppress;
 
-    if (step_count <= 1) {
-        lv_obj_add_state(ctx->list_slider, LV_STATE_DISABLED);
-    } else {
-        lv_obj_remove_state(ctx->list_slider, LV_STATE_DISABLED);
-    }
+    lv_obj_remove_state(ctx->list_slider, LV_STATE_DISABLED);
 }
 
 static void file_browser_schedule_wait_for_reconnection(void)
@@ -2114,14 +2125,24 @@ static void file_browser_on_slider_value_changed(lv_event_t *e)
     size_t step = 1;
     file_browser_get_window_params(ctx, &window_size, &step);
     size_t total = fs_nav_total_items(&ctx->nav);
+    if (total <= window_size) {
+        return; /* Nothing to scroll */
+    }
+
+    size_t max_start = total - window_size;
+    size_t max_step_index = step ? ((max_start + step - 1) / step) : 0;
+
     int32_t slider_val = lv_slider_get_value(lv_event_get_target(e));
     if (slider_val < 0) {
         slider_val = 0;
     }
 
     size_t window_index = (size_t)slider_val;
-    size_t max_start = (total > window_size) ? (total - window_size) : 0;
-    size_t new_start = window_index * step;
+    if (window_index > max_step_index) {
+        window_index = max_step_index;
+    }
+
+    size_t new_start = (window_index >= max_step_index) ? max_start : (window_index * step);
     if (new_start > max_start) {
         new_start = max_start;
     }
