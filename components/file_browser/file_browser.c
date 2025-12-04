@@ -256,6 +256,15 @@ static void file_browser_path_scroll_timer_cb(lv_timer_t *timer);
  * @param scroll_to_top Fallback scroll when no anchor: true = top, false = bottom.
  */
 static void file_browser_apply_window(file_browser_ctx_t *ctx, size_t start_index, size_t anchor_index, bool center_anchor, bool scroll_to_top);
+
+/**
+ * @brief Helper to set a sensible reload anchor when none is provided.
+ *
+ * Uses the middle of the current window (clamped later) so reloads return near
+ * the current view instead of the top of the window.
+ *
+ * @param[in,out] ctx Browser context.
+ */
 static void file_browser_set_reload_anchor_current(file_browser_ctx_t *ctx);
 
 /**
