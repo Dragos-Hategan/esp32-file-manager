@@ -12,6 +12,7 @@
 #include "nvs.h"
 
 #include "touch_xpt2046.h"
+#include "settings.h"
 
 typedef struct
 {
@@ -151,7 +152,7 @@ static void ui_show_calibration_message(bool calibration_found);
  *    and two buttons: **Yes** and **No**
  *  - a loader row showing "Performing Calibration In:" with a circular progress
  *    arc and numeric countdown (10 → 1)
- *  - a row with the label "Ask For Calibration At Powerup" and a switch (default ON)
+ *  - a row with the label "Ask For Calibration At Startup" and a switch (default ON)
  *
  * The function blocks the calling task until the user presses a button or the
  * 10-second timeout elapses. On timeout, the result is treated as **Yes**.
@@ -171,7 +172,7 @@ static void ui_show_calibration_message(bool calibration_found);
  * @retval false if the user pressed **No**
  *
  * @note The countdown duration is fixed at 10000ms in this implementation. The
- *       toggle state is currently UI-only (no persistence/hook here).
+ *       toggle state persists to Settings (NVS) via @ref settings_set_calibration_prompt_enabled.
  * @warning The function performs blocking waits (semaphore / vTaskDelay).
  * @warning This function assumes there is no LVGL display lock already acquired.
  */
@@ -552,6 +553,13 @@ static void ui_show_calibration_message(bool calibration_found)
     lv_refr_now(NULL);
 }
 
+static void ui_on_ask_switch_changed(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    bool enabled = lv_obj_has_state(sw, LV_STATE_CHECKED);
+    settings_set_calibration_prompt_enabled(enabled);
+}
+
 static bool ui_yes_no_dialog(void)
 {
     bsp_display_lock(0);
@@ -640,7 +648,13 @@ static bool ui_yes_no_dialog(void)
     lv_obj_set_flex_grow(ask_label, 1); /* push switch to the far right */
 
     lv_obj_t *ask_switch = lv_switch_create(toggle_row);
-    lv_obj_add_state(ask_switch, LV_STATE_CHECKED); /* default ON */
+    bool prompt_enabled = settings_get_calibration_prompt_enabled();
+    if (prompt_enabled) {
+        lv_obj_add_state(ask_switch, LV_STATE_CHECKED);
+    } else {
+        lv_obj_clear_state(ask_switch, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(ask_switch, ui_on_ask_switch_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     lv_obj_invalidate(overlay);
     lv_refr_now(lv_disp_get_default());

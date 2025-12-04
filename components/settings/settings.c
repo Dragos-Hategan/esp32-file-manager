@@ -29,13 +29,14 @@
 #define SETTINGS_NVS_DIM_LEVEL_KEY      "dim_level"
 #define SETTINGS_NVS_OFF_EN_KEY         "off_en"
 #define SETTINGS_NVS_OFF_TIME_KEY       "off_time"
+#define SETTINGS_NVS_CALIB_PROMPT_KEY   "calib_prompt"
 
 #define SETTINGS_ROTATION_STEPS          4
 #define SETTINGS_DEFAULT_ROTATION_STEP   3
-#define SETTINGS_MINIMUM_BRIGHTNESS      10   /**< Lowest brightness percent to avoid black screen */
+#define SETTINGS_MINIMUM_BRIGHTNESS      10   /**< Lowest brightness percentage to avoid black screen */
 #define SETTINGS_DEFAULT_BRIGHTNESS      100
 
-#define SETTINGS_CALIBRATION_TASK_STACK  (6 * 1024)
+#define SETTINGS_CALIBRATION_TASK_STACK  (10 * 1024)
 #define SETTINGS_CALIBRATION_TASK_PRIO   (5)
 #define SETTINGS_DIM_FADE_MS             500
 #define SETTINGS_OFF_FADE_MS             500
@@ -45,21 +46,22 @@
 #define STR(x)                      STR_HELPER(x)
 
 typedef struct{
-    int screen_rotation_step;   /**< Current rotation step (0-3) applied to display */
-    int saved_rotation_step;    /**< Last persisted rotation step */
-    int brightness;             /**< Current brightness percentage */
-    int saved_brightness;       /**< Last persisted brightness percentage */
+    int screen_rotation_step;           /**< Current rotation step (0-3) applied to display */
+    int saved_rotation_step;            /**< Last persisted rotation step */
+    int brightness;                     /**< Current brightness percentage */
+    int saved_brightness;               /**< Last persisted brightness percentage */
     int dt_month;
     int dt_day;
     int dt_year;
     int dt_hour;
     int dt_minute;
-    bool time_valid;            /**< True if a valid time was set/restored */
+    bool time_valid;                    /**< True if a valid time was set/restored */
     bool screen_dim;
     int dim_time;
     int dim_level;
     bool screen_off;
     int off_time;
+    bool calibration_prompt_enabled;    /**< True to ask for calibration at startup */
 }settings_t;
 
 typedef struct{
@@ -202,7 +204,7 @@ static void settings_reset(lv_event_t *e);
 /**
  * @brief Confirm reset, restore defaults, and reinitialize settings.
  *
- * Resets brightness and rotation to defaults, persists them, reinitializes runtime state,
+ * Resets all configurable settings to defaults, persists them, reinitializes runtime state,
  * and closes the reset dialog.
  *
  * @param e LVGL event (CLICKED) with user data = settings_ctx_t*.
@@ -352,6 +354,16 @@ static void load_screensaver_from_nvs(void);
  * @brief Persist screensaver dim/off settings to NVS.
  */
 static void persist_screensaver_to_nvs(void);
+
+/**
+ * @brief Load calibration prompt preference from NVS (defaults to enabled).
+ */
+static void load_calibration_prompt_from_nvs(void);
+
+/**
+ * @brief Persist calibration prompt preference to NVS.
+ */
+static void persist_calibration_prompt_to_nvs(void);
 
 /**
  * @brief Initialize runtime settings defaults.
@@ -654,11 +666,13 @@ void starting_routine(void)
     ESP_ERROR_CHECK(init_touch()); 
     ESP_LOGI(TAG, "Registering touch driver to LVGL");
     ESP_ERROR_CHECK(register_touch_to_lvgl());
+    ESP_LOGI(TAG, "Load touch driver calibration data");
     bool calibration_found;
-    ESP_LOGI(TAG, "Check for touch driver calibration data");
     load_nvs_calibration(&calibration_found);
-    ESP_LOGI(TAG, "Start calibration dialog");
-    ESP_ERROR_CHECK(calibration_test(calibration_found));
+    if (s_settings_ctx.settings.calibration_prompt_enabled){
+        ESP_LOGI(TAG, "Start calibration dialog");
+        ESP_ERROR_CHECK(calibration_test(calibration_found));
+    }
 }
 
 esp_err_t settings_open_settings(lv_obj_t *return_screen)
@@ -757,6 +771,20 @@ bool settings_is_wake_in_progress(void)
 bool settings_get_brightness_state(void)
 {
     return s_settings_ctx.changing_brightness; 
+}
+
+bool settings_get_calibration_prompt_enabled(void)
+{
+    return s_settings_ctx.settings.calibration_prompt_enabled;
+}
+
+void settings_set_calibration_prompt_enabled(bool enable)
+{
+    if (s_settings_ctx.settings.calibration_prompt_enabled == enable) {
+        return;
+    }
+    s_settings_ctx.settings.calibration_prompt_enabled = enable;
+    persist_calibration_prompt_to_nvs();
 }
 
 static void settings_build_screen(settings_ctx_t *ctx)
@@ -1329,6 +1357,44 @@ static void persist_screensaver_to_nvs(void)
     }
 }
 
+static void load_calibration_prompt_from_nvs(void)
+{
+    /* Default: enabled */
+    s_settings_ctx.settings.calibration_prompt_enabled = true;
+
+    nvs_handle_t h;
+    if (nvs_open(SETTINGS_NVS_NS, NVS_READONLY, &h) != ESP_OK) {
+        return;
+    }
+
+    int8_t raw = -1;
+    if (nvs_get_i8(h, SETTINGS_NVS_CALIB_PROMPT_KEY, &raw) == ESP_OK) {
+        s_settings_ctx.settings.calibration_prompt_enabled = (raw != 0);
+    }
+
+    nvs_close(h);
+}
+
+static void persist_calibration_prompt_to_nvs(void)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(SETTINGS_NVS_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for calibration prompt: (%s)", esp_err_to_name(err));
+        return;
+    }
+
+    esp_err_t res = nvs_set_i8(h, SETTINGS_NVS_CALIB_PROMPT_KEY, s_settings_ctx.settings.calibration_prompt_enabled ? 1 : 0);
+    if (res == ESP_OK) {
+        res = nvs_commit(h);
+    }
+    nvs_close(h);
+
+    if (res != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save calibration prompt preference: (%s)", esp_err_to_name(res));
+    }
+}
+
 static void init_settings(void)
 {
     s_settings_ctx.settings.screen_rotation_step = SETTINGS_DEFAULT_ROTATION_STEP;
@@ -1342,9 +1408,11 @@ static void init_settings(void)
     s_settings_ctx.settings.dim_level = -1;
     s_settings_ctx.settings.screen_off = false;
     s_settings_ctx.settings.off_time = -1;
+    s_settings_ctx.settings.calibration_prompt_enabled = true;
     load_brightness_from_nvs();
     load_rotation_from_nvs();
     load_screensaver_from_nvs();
+    load_calibration_prompt_from_nvs();
     bsp_display_brightness_set(s_settings_ctx.settings.brightness);
     apply_rotation_to_display(true);
     settings_restore_time_from_nvs();
@@ -2399,10 +2467,12 @@ static void settings_reset_confirm(lv_event_t *e)
     ctx->settings.dim_level = -1;
     ctx->settings.screen_off = false;
     ctx->settings.off_time = -1;
+    ctx->settings.calibration_prompt_enabled = true;
 
     persist_brightness_to_nvs();
     persist_rotation_to_nvs();
     persist_screensaver_to_nvs();
+    persist_calibration_prompt_to_nvs();
     init_settings();
     settings_clear_time_in_nvs();
     s_settings_ctx.settings.time_valid = false;

@@ -87,6 +87,20 @@ int settings_get_active_brightness(void);
  */
 bool settings_get_brightness_state(void);
 
+/**
+ * @brief Get the stored preference for prompting calibration at startup.
+ *
+ * @return true if the prompt is enabled, false otherwise.
+ */
+bool settings_get_calibration_prompt_enabled(void);
+
+/**
+ * @brief Persist the preference for prompting calibration at startup.
+ *
+ * @param enable true to enable the prompt, false to disable.
+ */
+void settings_set_calibration_prompt_enabled(bool enable);
+
 #ifdef __cplusplus
 }
 #endif
