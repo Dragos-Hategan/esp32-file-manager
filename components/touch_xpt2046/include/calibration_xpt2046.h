@@ -46,11 +46,25 @@ void load_nvs_calibration(bool *calibration_found);
  * @param[in] calibration_found  True if a valid calibration was loaded from NVS,
  *                               false if no calibration data is available.
  *
- * @return ESP_OK                 Calibration flow completed successfully
- *                                (either run or skipped by user).
- * @return Other esp_err_t codes  If run_5point_touch_calibration() fails.
+ * @note User prompt behavior:
+ *       - When the loader is enabled (see @ref calibration_set_show_loader),
+ *         the Yes/No dialog auto-confirms "Yes" after 10 seconds.
+ *       - When the loader is disabled (Settings flow), there is no countdown and
+ *         the function waits for an explicit Yes/No.
+ *
+ * @return ESP_OK                  Calibration flow completed successfully
+ *                                 (either run or skipped by user).
+ * @return Other esp_err_t codes   If run_5point_touch_calibration() fails.
  */
 esp_err_t run_calibration(bool calibration_found);
+
+/**
+ * @brief Control whether the countdown loader is shown in the calibration dialog.
+ *
+ * Call with @c false when launching calibration from Settings to skip the loader,
+ * and @c true for the startup flow to keep it visible.
+ */
+void calibration_set_show_loader(bool enable);
 
 /**
  * @brief Apply current touch calibration to a raw (x,y) reading.

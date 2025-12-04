@@ -39,6 +39,7 @@ typedef struct
 
 static const int CALIBRATION_MESSAGE_DISPLAY_TIME_MS = 3000;
 static touch_cal_t s_cal = {0};
+static bool s_show_loader = true;
 
 /** @brief 5-point calibration target set (screen-space). */
 static cal_point_t s_cal_points[5] = {
@@ -145,17 +146,19 @@ static esp_err_t sample_raw(int *rx, int *ry);
 static void ui_show_calibration_message(bool calibration_found);
 
 /**
- * @brief Show a modal Yes/No dialog with a 10-second auto-yes countdown.
+ * @brief Show a modal Yes/No dialog with optional 10-second auto-yes countdown.
  *
  * Builds a centered vertical stack on the top layer containing:
  *  - an LVGL message box with the fixed question "Run Touch Screen Calibration?"
  *    and two buttons: **Yes** and **No**
- *  - a loader row showing "Performing Calibration In:" with a circular progress
- *    arc and numeric countdown (10 → 1)
+ *  - optionally a loader row showing "Performing Calibration In:" with a circular progress
+ *    arc and numeric countdown (10 → 1) when the loader is enabled
  *  - a row with the label "Ask For Calibration At Startup" and a switch (default ON)
  *
- * The function blocks the calling task until the user presses a button or the
- * 10-second timeout elapses. On timeout, the result is treated as **Yes**.
+ * The function blocks the calling task:
+ *  - When the loader/countdown is enabled: until the user presses a button or the
+ *    10-second timeout elapses (timeout treated as **Yes**).
+ *  - When the loader is disabled: until the user explicitly presses Yes/No (no timeout).
  *
  * Thread-safety: internal calls to @ref bsp_display_lock / @ref bsp_display_unlock
  * protect LVGL operations. This function must be called from a task context
@@ -171,7 +174,7 @@ static void ui_show_calibration_message(bool calibration_found);
  * @retval true  if the user pressed **Yes** or the countdown timed out
  * @retval false if the user pressed **No**
  *
- * @note The countdown duration is fixed at 10000ms in this implementation. The
+ * @note When the loader is enabled, the countdown duration is fixed at 10000ms. The
  *       toggle state persists to Settings (NVS) via @ref settings_set_calibration_prompt_enabled.
  * @warning The function performs blocking waits (semaphore / vTaskDelay).
  * @warning This function assumes there is no LVGL display lock already acquired.
@@ -275,6 +278,11 @@ esp_err_t run_calibration(bool calibration_found)
     }
 
     return ESP_OK;
+}
+
+void calibration_set_show_loader(bool enable)
+{
+    s_show_loader = enable;
 }
 
 void apply_touch_calibration(uint16_t raw_x, uint16_t raw_y, lv_point_t *out_point, int xmax, int ymax)
@@ -600,35 +608,40 @@ static bool ui_yes_no_dialog(void)
     btn = lv_msgbox_add_footer_button(mbox, "No");
     lv_obj_add_event_cb(btn, event_cb, LV_EVENT_CLICKED, &msg_box_response);
 
-    /* Compact row aligned under the dialog: text on the left, countdown on the right. */
-    lv_obj_t *loader_wrap = lv_obj_create(stack);
-    lv_obj_remove_style_all(loader_wrap);
-    lv_obj_set_style_pad_all(loader_wrap, 4, 0);
-    lv_obj_set_style_border_width(loader_wrap, 0, 0);
-    lv_obj_set_style_pad_gap(loader_wrap, 10, 0);
-    lv_obj_set_flex_flow(loader_wrap, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(loader_wrap, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_width(loader_wrap, 260);
-    lv_obj_set_height(loader_wrap, LV_SIZE_CONTENT);
+    lv_obj_t *loader_wrap = NULL;
+    lv_obj_t *loading_arc = NULL;
+    lv_obj_t *countdown_label = NULL;
+    if (s_show_loader) {
+        /* Compact row aligned under the dialog: text on the left, countdown on the right. */
+        loader_wrap = lv_obj_create(stack);
+        lv_obj_remove_style_all(loader_wrap);
+        lv_obj_set_style_pad_all(loader_wrap, 4, 0);
+        lv_obj_set_style_border_width(loader_wrap, 0, 0);
+        lv_obj_set_style_pad_gap(loader_wrap, 10, 0);
+        lv_obj_set_flex_flow(loader_wrap, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(loader_wrap, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_width(loader_wrap, 260);
+        lv_obj_set_height(loader_wrap, LV_SIZE_CONTENT);
 
-    lv_obj_t *performing_label = lv_label_create(loader_wrap);
-    lv_label_set_text(performing_label, "Performing Calibration In:");
-    lv_obj_set_style_text_align(performing_label, LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_set_width(performing_label, LV_SIZE_CONTENT);
-    lv_obj_set_flex_grow(performing_label, 1);
+        lv_obj_t *performing_label = lv_label_create(loader_wrap);
+        lv_label_set_text(performing_label, "Performing Calibration In:");
+        lv_obj_set_style_text_align(performing_label, LV_TEXT_ALIGN_LEFT, 0);
+        lv_obj_set_width(performing_label, LV_SIZE_CONTENT);
+        lv_obj_set_flex_grow(performing_label, 1);
 
-    lv_obj_t *loading_arc = lv_arc_create(loader_wrap);
-    lv_obj_set_size(loading_arc, 48, 48); // slightly smaller for better proportions
-    lv_arc_set_range(loading_arc, 0, 100);
-    lv_arc_set_bg_angles(loading_arc, 0, 360);
-    lv_arc_set_rotation(loading_arc, 270);
-    lv_arc_set_value(loading_arc, 100);
-    lv_obj_remove_style(loading_arc, NULL, LV_PART_KNOB);
+        loading_arc = lv_arc_create(loader_wrap);
+        lv_obj_set_size(loading_arc, 48, 48); // slightly smaller for better proportions
+        lv_arc_set_range(loading_arc, 0, 100);
+        lv_arc_set_bg_angles(loading_arc, 0, 360);
+        lv_arc_set_rotation(loading_arc, 270);
+        lv_arc_set_value(loading_arc, 100);
+        lv_obj_remove_style(loading_arc, NULL, LV_PART_KNOB);
 
-    lv_obj_t *countdown_label = lv_label_create(loading_arc);
-    lv_obj_set_style_text_font(countdown_label, LV_FONT_DEFAULT, 0);
-    lv_label_set_text(countdown_label, "10");
-    lv_obj_center(countdown_label);
+        countdown_label = lv_label_create(loading_arc);
+        lv_obj_set_style_text_font(countdown_label, LV_FONT_DEFAULT, 0);
+        lv_label_set_text(countdown_label, "10");
+        lv_obj_center(countdown_label);
+    }
 
     /* Toggle row under the loader: text on the left, switch on the right. */
     lv_obj_t *toggle_row = lv_obj_create(stack);
@@ -661,56 +674,64 @@ static bool ui_yes_no_dialog(void)
 
     bsp_display_unlock();
 
-    const uint32_t countdown_ms = 10000;
-    TickType_t start_ticks = xTaskGetTickCount();
-    TickType_t timeout_ticks = pdMS_TO_TICKS(countdown_ms);
-    int last_second_displayed = 5;
-    int last_arc_value = 100;
-
-    while (true)
+    if (!s_show_loader)
     {
-        if (xSemaphoreTake(msg_box_response.xSemaphore, pdMS_TO_TICKS(50)) == pdTRUE)
+        /* Settings flow: no countdown/auto-yes. Wait for explicit Yes/No. */
+        xSemaphoreTake(msg_box_response.xSemaphore, portMAX_DELAY);
+    }
+    else
+    {
+        const uint32_t countdown_ms = 10000;
+        TickType_t start_ticks = xTaskGetTickCount();
+        TickType_t timeout_ticks = pdMS_TO_TICKS(countdown_ms);
+        int last_second_displayed = 5;
+        int last_arc_value = 100;
+
+        while (true)
         {
-            break;
-        }
-
-        TickType_t now_ticks = xTaskGetTickCount();
-        TickType_t elapsed_ticks = now_ticks - start_ticks;
-        uint32_t elapsed_ms = elapsed_ticks * portTICK_PERIOD_MS;
-
-        if (elapsed_ticks >= timeout_ticks)
-        {
-            msg_box_response.response = true;
-            break;
-        }
-
-        int seconds_left = 10 - (elapsed_ms / 1000);
-        if (seconds_left < 1)
-        {
-            seconds_left = 1;
-        }
-
-        int arc_value = 100 - (int)((elapsed_ms * 100) / countdown_ms);
-        if (arc_value < 0)
-            arc_value = 0;
-
-        if (seconds_left != last_second_displayed || arc_value != last_arc_value)
-        {
-            bsp_display_lock(0);
-            if (seconds_left != last_second_displayed)
+            if (xSemaphoreTake(msg_box_response.xSemaphore, pdMS_TO_TICKS(50)) == pdTRUE)
             {
-                lv_label_set_text_fmt(countdown_label, "%d", seconds_left);
-                last_second_displayed = seconds_left;
+                break;
             }
-            if (arc_value != last_arc_value)
-            {
-                lv_arc_set_value(loading_arc, arc_value);
-                last_arc_value = arc_value;
-            }
-            bsp_display_unlock();
-        }
 
-        vTaskDelay(pdMS_TO_TICKS(20));
+            TickType_t now_ticks = xTaskGetTickCount();
+            TickType_t elapsed_ticks = now_ticks - start_ticks;
+            uint32_t elapsed_ms = elapsed_ticks * portTICK_PERIOD_MS;
+
+            if (elapsed_ticks >= timeout_ticks)
+            {
+                msg_box_response.response = true;
+                break;
+            }
+
+            int seconds_left = 10 - (elapsed_ms / 1000);
+            if (seconds_left < 1)
+            {
+                seconds_left = 1;
+            }
+
+            int arc_value = 100 - (int)((elapsed_ms * 100) / countdown_ms);
+            if (arc_value < 0)
+                arc_value = 0;
+
+            if (seconds_left != last_second_displayed || arc_value != last_arc_value)
+            {
+                bsp_display_lock(0);
+                if (s_show_loader && countdown_label && seconds_left != last_second_displayed)
+                {
+                    lv_label_set_text_fmt(countdown_label, "%d", seconds_left);
+                    last_second_displayed = seconds_left;
+                }
+                if (s_show_loader && loading_arc && arc_value != last_arc_value)
+                {
+                    lv_arc_set_value(loading_arc, arc_value);
+                    last_arc_value = arc_value;
+                }
+                bsp_display_unlock();
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
     }
 
     bsp_display_lock(0);

@@ -680,6 +680,7 @@ void starting_routine(void)
     load_nvs_calibration(&calibration_found);
     if (s_settings_ctx.settings.calibration_prompt_enabled){ // Default is true
         ESP_LOGI(TAG, "Start calibration dialog");
+        calibration_set_show_loader(true);
         settings_set_running_calibration(true);
         ESP_ERROR_CHECK(run_calibration(calibration_found));
         settings_set_running_calibration(false);
@@ -2529,6 +2530,7 @@ static void settings_run_calibration(lv_event_t *e)
     }
 
     settings_set_running_calibration(true);
+    calibration_set_show_loader(false);
 
     lv_obj_clean(ctx->screen);
     settings_clear_ui_refs(ctx);
