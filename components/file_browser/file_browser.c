@@ -27,9 +27,9 @@
 
 #define TAG "file_browser"
 
-#define FILE_BROWSER_MAX_SORTABLE_ITEMS     128  /* 0 = unlimited */
-#define FILE_BROWSER_LIST_WINDOW_SIZE       40
-#define FILE_BROWSER_LIST_WINDOW_STEP       20
+#define FILE_BROWSER_MAX_SORTABLE_ITEMS     128  // CAUTION! BIGGER NUMBER MEANS MEMORY CRASHES
+#define FILE_BROWSER_LIST_WINDOW_SIZE       36   // CAUTION! BIGGER NUMBER MEANS MEMORY CRASHES
+#define FILE_BROWSER_LIST_WINDOW_STEP       18   // CAUTION! BIGGER NUMBER MEANS MEMORY CRASHES
 #define FILE_BROWSER_PATH_SCROLL_DELAY_MS   1500
 
 #define FILE_BROWSER_WAIT_STACK_SIZE_B      (6 * 1024)
@@ -1329,7 +1329,9 @@ static void file_browser_apply_window(file_browser_ctx_t *ctx, size_t start_inde
 
     bool prev_suppress = ctx->list_suppress_scroll;
     ctx->list_suppress_scroll = true;
+    file_browser_show_loading(ctx);
     file_browser_populate_list(ctx);
+    file_browser_hide_loading(ctx);
     lv_obj_update_layout(ctx->list);
 
     if (ctx->list_has_paged) {
