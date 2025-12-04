@@ -110,6 +110,8 @@ typedef struct {
     bool list_suppress_scroll;
     bool list_has_paged;
     bool slider_suppress_change;
+    bool slider_drag_active;
+    size_t slider_pending_step;
 } file_browser_ctx_t;
 
 static file_browser_ctx_t s_browser;
@@ -1296,7 +1298,10 @@ static void file_browser_build_screen(file_browser_ctx_t *ctx)
     lv_obj_set_style_radius(list_slider, 6, LV_PART_KNOB);
     lv_obj_set_style_width(list_slider, 12, LV_PART_KNOB);
     lv_obj_set_style_height(list_slider, 12, LV_PART_KNOB);
+    lv_obj_add_event_cb(list_slider, file_browser_on_slider_value_changed, LV_EVENT_PRESSED, ctx);
     lv_obj_add_event_cb(list_slider, file_browser_on_slider_value_changed, LV_EVENT_VALUE_CHANGED, ctx);
+    lv_obj_add_event_cb(list_slider, file_browser_on_slider_value_changed, LV_EVENT_RELEASED, ctx);
+    lv_obj_add_event_cb(list_slider, file_browser_on_slider_value_changed, LV_EVENT_PRESS_LOST, ctx);
     lv_obj_clear_flag(list_slider, LV_OBJ_FLAG_SCROLL_CHAIN); /* Keep list from scrolling when dragging slider */
     ctx->list_slider = list_slider;
 }
@@ -1312,6 +1317,8 @@ static void file_browser_reset_window(file_browser_ctx_t *ctx)
     ctx->list_at_bottom_edge = false;
     ctx->list_suppress_scroll = false;
     ctx->list_has_paged = false;
+    ctx->slider_drag_active = false;
+    ctx->slider_pending_step = SIZE_MAX;
 }
 
 static void file_browser_get_window_params(file_browser_ctx_t *ctx, size_t *window_size, size_t *step)
@@ -1384,6 +1391,7 @@ static void file_browser_update_slider(file_browser_ctx_t *ctx)
         lv_slider_set_range(ctx->list_slider, 0, 0);
         lv_slider_set_value(ctx->list_slider, 0, LV_ANIM_OFF);
         ctx->slider_suppress_change = prev_suppress;
+        ctx->slider_pending_step = 0;
         lv_obj_add_state(ctx->list_slider, LV_STATE_DISABLED);
         return;
     }
@@ -1407,6 +1415,7 @@ static void file_browser_update_slider(file_browser_ctx_t *ctx)
     lv_slider_set_range(ctx->list_slider, max_val, 0); /* min at top, max at bottom */
     lv_slider_set_value(ctx->list_slider, (int32_t)current_step, LV_ANIM_OFF);
     ctx->slider_suppress_change = prev_suppress;
+    ctx->slider_pending_step = current_step;
 
     lv_obj_remove_state(ctx->list_slider, LV_STATE_DISABLED);
 }
@@ -2121,6 +2130,8 @@ static void file_browser_on_slider_value_changed(lv_event_t *e)
         return;
     }
 
+    lv_event_code_t code = lv_event_get_code(e);
+
     size_t window_size = 1;
     size_t step = 1;
     file_browser_get_window_params(ctx, &window_size, &step);
@@ -2137,18 +2148,39 @@ static void file_browser_on_slider_value_changed(lv_event_t *e)
         slider_val = 0;
     }
 
-    size_t window_index = (size_t)slider_val;
-    if (window_index > max_step_index) {
-        window_index = max_step_index;
+    size_t clamped_step = (size_t)slider_val;
+    if (clamped_step > max_step_index) {
+        clamped_step = max_step_index;
     }
 
-    size_t new_start = (window_index >= max_step_index) ? max_start : (window_index * step);
-    if (new_start > max_start) {
-        new_start = max_start;
+    /* Track the step during drag; apply only on release. */
+    if (code == LV_EVENT_PRESSED) {
+        ctx->slider_drag_active = true;
+        ctx->slider_pending_step = clamped_step;
+        return;
     }
 
-    ctx->list_has_paged = true;
-    file_browser_apply_window(ctx, new_start, SIZE_MAX, true, true);
+    if (code == LV_EVENT_VALUE_CHANGED) {
+        ctx->slider_pending_step = clamped_step;
+        return;
+    }
+
+    if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        size_t target_step = ctx->slider_pending_step == SIZE_MAX ? clamped_step : ctx->slider_pending_step;
+        if (target_step > max_step_index) {
+            target_step = max_step_index;
+        }
+
+        size_t new_start = (target_step >= max_step_index) ? max_start : (target_step * step);
+        if (new_start > max_start) {
+            new_start = max_start;
+        }
+
+        ctx->slider_pending_step = SIZE_MAX;
+        ctx->slider_drag_active = false;
+        ctx->list_has_paged = true;
+        file_browser_apply_window(ctx, new_start, SIZE_MAX, true, true);
+    }
 }
 
 static void file_browser_on_item_long_press(lv_event_t *e)
