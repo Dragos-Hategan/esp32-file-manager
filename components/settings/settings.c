@@ -273,6 +273,14 @@ static void settings_close_screensaver(lv_event_t *e);
 static void settings_calibration_task(void *param);
 
 /**
+ * @brief Clear cached LVGL object pointers in the settings context.
+ *
+ * Call after deleting/cleaning the settings UI to avoid dangling pointers being
+ * used by async callbacks (e.g., brightness updates).
+ */
+static void settings_clear_ui_refs(settings_ctx_t *ctx);
+
+/**
  * @brief Initialize the Non-Volatile Storage (NVS) flash partition.
  *
  * This function initializes the NVS used for storing persistent configuration
@@ -1019,7 +1027,7 @@ static void settings_on_about(lv_event_t *e)
         "Screensaver: opens the screensaver configuration for dimming and turning off the screen.",
         "Set Date/Time: opens the date/time picker to set clock values (HH:MM MM/DD/YY).",
         "Rotate Screen: rotates the display 90 degrees each time.",
-        "Run Calibration: starts the touch calibration wizard and saves the new calibration data.",
+        "Run Calibration: starts the touch calibration wizard and saves the new calibration data. Also offers startup calibration toggle.",
         "Restart: reboots the device after saving system changes. Note: settings are also saved by simply leaving settings.",
         "Reset: restores and saves screensaver, brightness, rotation and date/time to defaults.",
     };
@@ -1088,6 +1096,7 @@ static void settings_close(settings_ctx_t *ctx)
         lv_screen_load(ctx->return_screen);
     }    
     lv_obj_del(ctx->screen);
+    settings_clear_ui_refs(ctx);
     ctx->active = false;
     ctx->screen = NULL;
 }
@@ -2522,6 +2531,7 @@ static void settings_run_calibration(lv_event_t *e)
     settings_set_running_calibration(true);
 
     lv_obj_clean(ctx->screen);
+    settings_clear_ui_refs(ctx);
 
     /* Run calibration asynchronously to avoid blocking the LVGL task/UI thread. */
     BaseType_t task_ok = xTaskCreate(settings_calibration_task,
@@ -2546,6 +2556,9 @@ static void settings_calibration_task(void *param)
         vTaskDelete(NULL);
         return;
     }
+
+    /* Clear cached widget pointers because we delete/clean the screen. */
+    settings_clear_ui_refs(ctx);
 
     int prev_rotation = ctx->settings.screen_rotation_step;
     
@@ -2581,6 +2594,44 @@ static void settings_calibration_task(void *param)
     
     settings_set_running_calibration(false);
     vTaskDelete(NULL);
+}
+
+static void settings_clear_ui_refs(settings_ctx_t *ctx)
+{
+    if (!ctx) {
+        return;
+    }
+
+    ctx->toolbar = NULL;
+    ctx->brightness_label = NULL;
+    ctx->brightness_slider = NULL;
+    ctx->restart_confirm_mbox = NULL;
+    ctx->reset_confirm_mbox = NULL;
+    ctx->datetime_overlay = NULL;
+    ctx->screensaver_overlay = NULL;
+    ctx->dt_month_ta = NULL;
+    ctx->dt_day_ta = NULL;
+    ctx->dt_year_ta = NULL;
+    ctx->dt_hour_ta = NULL;
+    ctx->dt_min_ta = NULL;
+    ctx->dt_keyboard = NULL;
+    ctx->dt_dialog = NULL;
+    ctx->screensaver_dialog = NULL;
+    ctx->dt_row_time = NULL;
+    ctx->ss_dim_lbl = NULL;
+    ctx->ss_dim_switch = NULL;
+    ctx->ss_dim_after_lbl = NULL;
+    ctx->ss_seconds_lbl = NULL;
+    ctx->ss_at_lbl = NULL;
+    ctx->ss_pct_lbl = NULL;
+    ctx->ss_dim_after_ta = NULL;
+    ctx->ss_dim_pct_ta = NULL;
+    ctx->ss_off_lbl = NULL;
+    ctx->ss_off_switch = NULL;
+    ctx->ss_off_after_lbl = NULL;
+    ctx->ss_off_seconds_lbl = NULL;
+    ctx->ss_off_after_ta = NULL;
+    ctx->ss_keyboard = NULL;
 }
 
 static void settings_screensaver(lv_event_t *e)
