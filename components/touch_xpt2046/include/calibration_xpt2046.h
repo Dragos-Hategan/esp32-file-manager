@@ -50,7 +50,7 @@ void load_nvs_calibration(bool *calibration_found);
  *                                (either run or skipped by user).
  * @return Other esp_err_t codes  If run_5point_touch_calibration() fails.
  */
-esp_err_t calibration_test(bool calibration_found);
+esp_err_t run_calibration(bool calibration_found);
 
 /**
  * @brief Apply current touch calibration to a raw (x,y) reading.

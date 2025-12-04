@@ -239,16 +239,16 @@ void load_nvs_calibration(bool *calibration_found)
     ESP_LOGI("touch_calibration", "%s", *calibration_found ? "Touch driver is already calibrated" : "Touch driver needs calibration");
 }
 
-esp_err_t calibration_test(bool calibration_found)
+esp_err_t run_calibration(bool calibration_found)
 {
-    esp_err_t calibration_test_err;
+    esp_err_t run_calibration_err;
     if (!calibration_found)
     {
         // No calibration saved: runs calibration directly
-        calibration_test_err = run_5point_touch_calibration(calibration_found);
-        if (calibration_test_err != ESP_OK){
-            ESP_LOGE("Calibration Test", "5 point calibration failed: (%s)", esp_err_to_name(calibration_test_err));
-            return calibration_test_err;
+        run_calibration_err = run_5point_touch_calibration(calibration_found);
+        if (run_calibration_err != ESP_OK){
+            ESP_LOGE("Calibration Test", "5 point calibration failed: (%s)", esp_err_to_name(run_calibration_err));
+            return run_calibration_err;
         }
     }
     else
@@ -259,10 +259,10 @@ esp_err_t calibration_test(bool calibration_found)
 
         if (run)
         {
-            calibration_test_err = run_5point_touch_calibration(calibration_found);
-            if (calibration_test_err != ESP_OK){
-                ESP_LOGE("Calibration Test", "5 point calibration failed: (%s)", esp_err_to_name(calibration_test_err));
-                return calibration_test_err;
+            run_calibration_err = run_5point_touch_calibration(calibration_found);
+            if (run_calibration_err != ESP_OK){
+                ESP_LOGE("Calibration Test", "5 point calibration failed: (%s)", esp_err_to_name(run_calibration_err));
+                return run_calibration_err;
             }
         }
         else

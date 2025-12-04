@@ -101,6 +101,20 @@ bool settings_get_calibration_prompt_enabled(void);
  */
 void settings_set_calibration_prompt_enabled(bool enable);
 
+/**
+ * @brief Get the state of the calibration wizard.
+ *
+ * @return true if the calibration is being run, false otherwise.
+ */
+bool settings_get_running_calibration(void);
+
+/**
+ * @brief Set the calibration running guard flag.
+ *
+ * @param enable true when calibration is in progress, false when idle.
+ */
+void settings_set_running_calibration(bool enable);
+
 #ifdef __cplusplus
 }
 #endif

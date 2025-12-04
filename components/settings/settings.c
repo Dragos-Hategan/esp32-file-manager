@@ -62,6 +62,7 @@ typedef struct{
     bool screen_off;
     int off_time;
     bool calibration_prompt_enabled;    /**< True to ask for calibration at startup */
+    bool running_calibration;
 }settings_t;
 
 typedef struct{
@@ -264,7 +265,7 @@ static void settings_close_screensaver(lv_event_t *e);
 /**
  * @brief Background task to run touch calibration and restore UI state.
  *
- * Temporarily forces default rotation for calibration, runs @ref calibration_test,
+ * Temporarily forces default rotation for calibration, runs @ref run_calibration,
  * restores the previous rotation, and reopens the settings screen.
  *
  * @param param settings_ctx_t* passed from @ref settings_run_calibration.
@@ -669,9 +670,11 @@ void starting_routine(void)
     ESP_LOGI(TAG, "Load touch driver calibration data");
     bool calibration_found;
     load_nvs_calibration(&calibration_found);
-    if (s_settings_ctx.settings.calibration_prompt_enabled){
+    if (s_settings_ctx.settings.calibration_prompt_enabled){ // Default is true
         ESP_LOGI(TAG, "Start calibration dialog");
-        ESP_ERROR_CHECK(calibration_test(calibration_found));
+        settings_set_running_calibration(true);
+        ESP_ERROR_CHECK(run_calibration(calibration_found));
+        settings_set_running_calibration(false);
     }
 }
 
@@ -785,6 +788,16 @@ void settings_set_calibration_prompt_enabled(bool enable)
     }
     s_settings_ctx.settings.calibration_prompt_enabled = enable;
     persist_calibration_prompt_to_nvs();
+}
+
+bool settings_get_running_calibration(void)
+{
+    return s_settings_ctx.settings.running_calibration;
+}
+
+void settings_set_running_calibration(bool enable)
+{
+    s_settings_ctx.settings.running_calibration = enable;
 }
 
 static void settings_build_screen(settings_ctx_t *ctx)
@@ -1409,6 +1422,7 @@ static void init_settings(void)
     s_settings_ctx.settings.screen_off = false;
     s_settings_ctx.settings.off_time = -1;
     s_settings_ctx.settings.calibration_prompt_enabled = true;
+    s_settings_ctx.settings.running_calibration = false;
     load_brightness_from_nvs();
     load_rotation_from_nvs();
     load_screensaver_from_nvs();
@@ -2499,15 +2513,28 @@ static void settings_run_calibration(lv_event_t *e)
         return;
     }
 
+    if (settings_get_running_calibration())
+    {
+        ESP_LOGW(TAG, "Calibration already running; ignoring request");
+        return;
+    }
+
+    settings_set_running_calibration(true);
+
     lv_obj_clean(ctx->screen);
 
     /* Run calibration asynchronously to avoid blocking the LVGL task/UI thread. */
-    xTaskCreate(settings_calibration_task,
-                "settings_calibration",
-                SETTINGS_CALIBRATION_TASK_STACK,
-                ctx,
-                SETTINGS_CALIBRATION_TASK_PRIO,
-                NULL);
+    BaseType_t task_ok = xTaskCreate(settings_calibration_task,
+                                     "settings_calibration",
+                                     SETTINGS_CALIBRATION_TASK_STACK,
+                                     ctx,
+                                     SETTINGS_CALIBRATION_TASK_PRIO,
+                                     NULL);
+    if (task_ok != pdPASS)
+    {
+        ESP_LOGE(TAG, "Failed to start calibration task");
+        settings_set_running_calibration(false);
+    }
 }
 
 static void settings_calibration_task(void *param)
@@ -2515,6 +2542,7 @@ static void settings_calibration_task(void *param)
     settings_ctx_t *ctx = (settings_ctx_t *)param;
 
     if (!ctx || !ctx->return_screen){
+        settings_set_running_calibration(false);
         vTaskDelete(NULL);
         return;
     }
@@ -2530,7 +2558,11 @@ static void settings_calibration_task(void *param)
     bsp_display_brightness_set(100);
     screensaver_dim_stop();
     screensaver_off_stop();
-    calibration_test(true);
+    esp_err_t calib_err = run_calibration(true);
+    if (calib_err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Calibration failed: %s", esp_err_to_name(calib_err));
+    }
     s_settings_ctx.changing_brightness = false;  
     settings_start_screensaver_timers();
 
@@ -2538,12 +2570,16 @@ static void settings_calibration_task(void *param)
     apply_rotation_to_display(true);
 
     bsp_display_lock(0);
-    lv_obj_del(ctx->screen);
+    if (ctx->screen)
+    {
+        lv_obj_del(ctx->screen);
+        ctx->screen = NULL;
+    }
     ctx->active = false;
-    ctx->screen = NULL;
     settings_open_settings(ctx->return_screen);
     bsp_display_unlock();
     
+    settings_set_running_calibration(false);
     vTaskDelete(NULL);
 }
 
