@@ -163,7 +163,6 @@ static void ui_show_calibration_message(bool calibration_found);
  *  - A user-provided event callback `event_cb` that writes the button result to
  *    a @c msg_box_response_t passed via @c user_data and gives the binary semaphore.
  *
- * @param question Null-terminated string displayed inside the message box.
  * @return bool
  * @retval true  if the user pressed **Yes** or the countdown timed out
  * @retval false if the user pressed **No**
@@ -172,7 +171,7 @@ static void ui_show_calibration_message(bool calibration_found);
  * @warning The function performs blocking waits (semaphore / vTaskDelay).
  * @warning This function assumes there is no LVGL display lock already acquired.
  */
-static bool ui_yes_no_dialog(const char *question);
+static bool ui_yes_no_dialog(void);
 
 /**
  * @brief Draw a four-arrow crosshair pointing to a target coordinate.
@@ -251,7 +250,7 @@ esp_err_t calibration_test(bool calibration_found)
     {
         // Run calibration?
         bool run;
-        run = ui_yes_no_dialog("Run Touch Screen Calibration?");
+        run = ui_yes_no_dialog();
 
         if (run)
         {
@@ -549,7 +548,7 @@ static void ui_show_calibration_message(bool calibration_found)
     lv_refr_now(NULL);
 }
 
-static bool ui_yes_no_dialog(const char *question)
+static bool ui_yes_no_dialog(void)
 {
     bsp_display_lock(0);
 
@@ -566,7 +565,7 @@ static bool ui_yes_no_dialog(const char *question)
     lv_obj_align(mbox1, LV_ALIGN_CENTER, 0, -50);
 
     lv_obj_t *label = lv_label_create(mbox1);
-    lv_label_set_text(label, question);
+    lv_label_set_text(label, "Run Touch Screen Calibration?");
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(label, lv_pct(100));
@@ -581,34 +580,57 @@ static bool ui_yes_no_dialog(const char *question)
     btn = lv_msgbox_add_footer_button(mbox1, "No");
     lv_obj_add_event_cb(btn, event_cb, LV_EVENT_CLICKED, &msg_box_response);
 
-    /* Compact container aligned exactly under the dialog */
+    /* Compact row aligned under the dialog: text on the left, countdown on the right. */
     lv_obj_t *loader_wrap = lv_obj_create(overlay);
     lv_obj_remove_style_all(loader_wrap);
-    lv_obj_set_style_pad_all(loader_wrap, 0, 0);
+    lv_obj_set_style_pad_all(loader_wrap, 4, 0);
     lv_obj_set_style_border_width(loader_wrap, 0, 0);
-    lv_obj_set_width(loader_wrap, 120);
+    lv_obj_set_style_pad_gap(loader_wrap, 10, 0);
+    lv_obj_set_flex_flow(loader_wrap, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(loader_wrap, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_width(loader_wrap, 260);
     lv_obj_set_height(loader_wrap, LV_SIZE_CONTENT);
     lv_obj_align_to(loader_wrap, mbox1, LV_ALIGN_OUT_BOTTOM_MID, 0, 8);
 
     lv_obj_t *performing_label = lv_label_create(loader_wrap);
     lv_label_set_text(performing_label, "Performing Calibration In:");
-    lv_obj_set_style_text_align(performing_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(performing_label, lv_pct(100));
-    lv_obj_align(performing_label, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_text_align(performing_label, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_width(performing_label, LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(performing_label, 1);
 
     lv_obj_t *loading_arc = lv_arc_create(loader_wrap);
-    lv_obj_set_size(loading_arc, 60, 60); // slightly smaller for better proportions
+    lv_obj_set_size(loading_arc, 48, 48); // slightly smaller for better proportions
     lv_arc_set_range(loading_arc, 0, 100);
     lv_arc_set_bg_angles(loading_arc, 0, 360);
     lv_arc_set_rotation(loading_arc, 270);
     lv_arc_set_value(loading_arc, 100);
     lv_obj_remove_style(loading_arc, NULL, LV_PART_KNOB);
-    lv_obj_align_to(loading_arc, performing_label, LV_ALIGN_OUT_BOTTOM_MID, 0, 6);
 
     lv_obj_t *countdown_label = lv_label_create(loading_arc);
     lv_obj_set_style_text_font(countdown_label, LV_FONT_DEFAULT, 0);
     lv_label_set_text(countdown_label, "10");
     lv_obj_center(countdown_label);
+
+    /* Toggle row under the loader: text on the left, switch on the right. */
+    lv_obj_t *toggle_row = lv_obj_create(overlay);
+    lv_obj_remove_style_all(toggle_row);
+    lv_obj_set_style_pad_all(toggle_row, 6, 0);
+    lv_obj_set_style_pad_gap(toggle_row, 12, 0);
+    lv_obj_set_flex_flow(toggle_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(toggle_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_width(toggle_row, lv_pct(80)); /* keep centered and within screen */
+    lv_obj_set_height(toggle_row, LV_SIZE_CONTENT);
+    lv_obj_align_to(toggle_row, loader_wrap, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
+
+    lv_obj_t *ask_label = lv_label_create(toggle_row);
+    lv_label_set_text(ask_label, "Ask For Calibration At Powerup");
+    lv_obj_set_style_text_align(ask_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(ask_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(ask_label, LV_PCT(100));
+    lv_obj_set_flex_grow(ask_label, 1); /* push switch to the far right */
+
+    lv_obj_t *ask_switch = lv_switch_create(toggle_row);
+    lv_obj_add_state(ask_switch, LV_STATE_CHECKED); /* default ON */
 
     lv_obj_invalidate(overlay);
     lv_refr_now(lv_disp_get_default());
