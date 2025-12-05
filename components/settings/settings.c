@@ -655,6 +655,46 @@ static void settings_clear_time_in_nvs(void);
 static void (*s_time_set_cb)(void) = NULL;
 static void (*s_time_reset_cb)(void) = NULL;
 
+static lv_obj_t *build_splash_screen(void)
+{
+    lv_obj_t *splash_scr = lv_obj_create(NULL);
+    lv_obj_remove_style_all(splash_scr);
+    lv_obj_set_style_bg_color(splash_scr, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(splash_scr, LV_OPA_COVER, 0);
+
+    lv_obj_t *label = lv_label_create(splash_scr);
+    lv_label_set_text(label, "File Manager");
+    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_center(label);
+
+    lv_screen_load(splash_scr);
+    return splash_scr;
+}
+
+static void show_splash_screen(void) {
+
+    bsp_display_lock(0);
+    lv_obj_t *previous = lv_screen_active();
+    lv_obj_t *splash_scr = build_splash_screen();
+    bsp_display_unlock();
+    
+    bsp_display_backlight_on();
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    
+    bsp_display_lock(0);
+    if (previous && lv_obj_is_valid(previous)) {
+        ESP_LOGW("da", "previous screen");
+        lv_screen_load(previous);
+    } else {
+        lv_obj_t *blank = lv_obj_create(NULL);
+        lv_obj_remove_style_all(blank);
+        lv_screen_load(blank);
+    }
+    lv_obj_del(splash_scr);
+    bsp_display_unlock();
+}
+
+
 void starting_routine(void)
 {
     /* ----- NSV ----- */
@@ -663,14 +703,15 @@ void starting_routine(void)
 
     /* ----- Display and LVGL ----- */
     ESP_LOGI(TAG, "Starting bsp for ILI9341 display");
-    ESP_ERROR_CHECK(bsp_display_start_result()); 
+    ESP_ERROR_CHECK(bsp_display_start_result());
+    bsp_display_backlight_off(); 
     apply_default_font_theme(true);
 
     /* ----- Configurations ----- */
     ESP_LOGI(TAG, "Loading configurations");
     init_settings();
 
-    /* ----- XPT2046 Touch Driver ----- */
+    /* ----- XPT2046 Driver Init ----- */
     ESP_LOGI(TAG, "Initializing XPT2046 touch driver");
     ESP_ERROR_CHECK(init_touch()); 
     ESP_LOGI(TAG, "Registering touch driver to LVGL");
@@ -678,6 +719,11 @@ void starting_routine(void)
     ESP_LOGI(TAG, "Load touch driver calibration data");
     bool calibration_found;
     load_nvs_calibration(&calibration_found);
+
+    ESP_LOGI(TAG, "Showing start screen");
+    show_splash_screen();
+
+    /* ----- XPT2046 Calibration ----- */
     if (s_settings_ctx.settings.calibration_prompt_enabled){ // Default is true
         ESP_LOGI(TAG, "Start calibration dialog");
         calibration_set_show_loader(true);
@@ -1420,6 +1466,7 @@ static void persist_calibration_prompt_to_nvs(void)
 
 static void init_settings(void)
 {
+    // Initializing Defaults
     s_settings_ctx.settings.screen_rotation_step = SETTINGS_DEFAULT_ROTATION_STEP;
     s_settings_ctx.settings.saved_rotation_step = s_settings_ctx.settings.screen_rotation_step;
     s_settings_ctx.settings.brightness = SETTINGS_DEFAULT_BRIGHTNESS;
@@ -1433,6 +1480,8 @@ static void init_settings(void)
     s_settings_ctx.settings.off_time = -1;
     s_settings_ctx.settings.calibration_prompt_enabled = true;
     s_settings_ctx.settings.running_calibration = false;
+
+    // Loading Saved Data
     load_brightness_from_nvs();
     load_rotation_from_nvs();
     load_screensaver_from_nvs();
@@ -2409,6 +2458,7 @@ static void settings_restart(lv_event_t *e)
 
 static void settings_restart_confirm(lv_event_t *e)
 {
+    bsp_display_backlight_off();
     settings_ctx_t *ctx = lv_event_get_user_data(e);
     if (ctx && ctx->brightness_slider) {
         int val = lv_slider_get_value(ctx->brightness_slider);
