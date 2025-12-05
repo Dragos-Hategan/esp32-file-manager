@@ -1341,7 +1341,9 @@ static void file_manager_build_screen(file_manager_ctx_t *ctx)
     lv_obj_set_width(ctx->list, LV_PCT(100));
     lv_obj_set_style_min_width(ctx->list, 0, 0);
     lv_obj_set_height(ctx->list, LV_PCT(100));
-    lv_obj_set_style_pad_all(ctx->list, 0, 0);
+    lv_obj_set_style_pad_left(ctx->list, 1, 0);
+    lv_obj_set_style_pad_right(ctx->list, 1, 0);
+    lv_obj_set_style_pad_bottom(ctx->list, 1, 0);
     lv_obj_add_event_cb(ctx->list, file_manager_on_list_scrolled, LV_EVENT_SCROLL, ctx);
 
     lv_obj_t *list_slider = lv_slider_create(list_row);
