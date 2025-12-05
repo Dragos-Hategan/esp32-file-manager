@@ -32,6 +32,7 @@
 #define FILE_BROWSER_LIST_WINDOW_STEP       18   // CAUTION! BIGGER NUMBER MEANS MEMORY CRASHES
 #define FILE_BROWSER_PATH_SCROLL_DELAY_MS   2000
 #define FILE_BROWSER_ENTRY_SCROLL_DELAY_MS  FILE_BROWSER_PATH_SCROLL_DELAY_MS
+#define FILE_BROWSER_SLIDER_GAP             6
 
 #define FILE_BROWSER_WAIT_STACK_SIZE_B      (6 * 1024)
 #define FILE_BROWSER_WAIT_PRIO              (4)
@@ -1326,15 +1327,13 @@ static void file_manager_build_screen(file_manager_ctx_t *ctx)
     lv_obj_set_style_text_align(ctx->cancel_paste_label, LV_TEXT_ALIGN_CENTER, 0);
     file_manager_update_second_header(ctx);
 
-    lv_coord_t slider_gap = 6;
-
     lv_obj_t *list_row = lv_obj_create(scr);
     lv_obj_remove_style_all(list_row);
     lv_obj_set_size(list_row, LV_PCT(100), LV_PCT(100));
     lv_obj_set_flex_flow(list_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(list_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_gap(list_row, slider_gap, 0);
-    lv_obj_set_style_pad_right(list_row, slider_gap, 0);
+    lv_obj_set_style_pad_gap(list_row, FILE_BROWSER_SLIDER_GAP, 0);
+    lv_obj_set_style_pad_right(list_row, FILE_BROWSER_SLIDER_GAP, 0);
     lv_obj_set_flex_grow(list_row, 1);
 
     ctx->list = lv_list_create(list_row);
@@ -1500,6 +1499,8 @@ static void file_manager_update_slider(file_manager_ctx_t *ctx)
     file_manager_get_window_params(ctx, &window_size, &step);
     size_t total = fs_nav_total_items(&ctx->nav);
 
+    lv_obj_t *list_row = ctx->list ? lv_obj_get_parent(ctx->list) : NULL;
+
     /* If everything fits in one window, lock the slider at start. */
     if (total <= window_size) {
         bool prev_suppress = ctx->slider_suppress_change;
@@ -1511,6 +1512,9 @@ static void file_manager_update_slider(file_manager_ctx_t *ctx)
         ctx->slider_drag_active = false;
         lv_obj_add_state(ctx->list_slider, LV_STATE_DISABLED);
         lv_obj_add_flag(ctx->list_slider, LV_OBJ_FLAG_HIDDEN);
+        if (list_row) {
+            lv_obj_set_style_pad_right(list_row, 0, 0);
+        }
         return;
     }
 
@@ -1537,6 +1541,9 @@ static void file_manager_update_slider(file_manager_ctx_t *ctx)
 
     lv_obj_remove_state(ctx->list_slider, LV_STATE_DISABLED);
     lv_obj_clear_flag(ctx->list_slider, LV_OBJ_FLAG_HIDDEN);
+    if (list_row) {
+        lv_obj_set_style_pad_right(list_row, FILE_BROWSER_SLIDER_GAP, 0);
+    }
 }
 
 static void file_manager_schedule_wait_for_reconnection(void)
