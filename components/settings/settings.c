@@ -655,43 +655,32 @@ static void settings_clear_time_in_nvs(void);
 static void (*s_time_set_cb)(void) = NULL;
 static void (*s_time_reset_cb)(void) = NULL;
 
-static lv_obj_t *build_splash_screen(void)
+static void build_splash_screen(void)
 {
-    lv_obj_t *splash_scr = lv_obj_create(NULL);
-    lv_obj_remove_style_all(splash_scr);
-    lv_obj_set_style_bg_color(splash_scr, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(splash_scr, LV_OPA_COVER, 0);
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_remove_style_all(scr);
+    lv_obj_clean(scr);
+    lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-    lv_obj_t *label = lv_label_create(splash_scr);
+    lv_obj_t *label = lv_label_create(scr);
     lv_label_set_text(label, "File Manager");
     lv_obj_set_style_text_color(label, lv_color_white(), 0);
     lv_obj_center(label);
 
-    lv_screen_load(splash_scr);
-    return splash_scr;
+    lv_screen_load(scr);
 }
 
 static void show_splash_screen(void) {
 
     bsp_display_lock(0);
-    lv_obj_t *previous = lv_screen_active();
-    lv_obj_t *splash_scr = build_splash_screen();
+    build_splash_screen();
     bsp_display_unlock();
     
+    // Small delay before turning on the screen to avoid wipe effect
+    vTaskDelay(pdMS_TO_TICKS(150));
     bsp_display_backlight_on();
-    vTaskDelay(pdMS_TO_TICKS(1500));
-    
-    bsp_display_lock(0);
-    if (previous && lv_obj_is_valid(previous)) {
-        ESP_LOGW("da", "previous screen");
-        lv_screen_load(previous);
-    } else {
-        lv_obj_t *blank = lv_obj_create(NULL);
-        lv_obj_remove_style_all(blank);
-        lv_screen_load(blank);
-    }
-    lv_obj_del(splash_scr);
-    bsp_display_unlock();
+    vTaskDelay(pdMS_TO_TICKS(1350));
 }
 
 
@@ -704,7 +693,7 @@ void starting_routine(void)
     /* ----- Display and LVGL ----- */
     ESP_LOGI(TAG, "Starting bsp for ILI9341 display");
     ESP_ERROR_CHECK(bsp_display_start_result());
-    bsp_display_backlight_off(); 
+    bsp_display_backlight_off();
     apply_default_font_theme(true);
 
     /* ----- Configurations ----- */
@@ -720,7 +709,7 @@ void starting_routine(void)
     bool calibration_found;
     load_nvs_calibration(&calibration_found);
 
-    ESP_LOGI(TAG, "Showing start screen");
+    ESP_LOGI(TAG, "Showing splash screen");
     show_splash_screen();
 
     /* ----- XPT2046 Calibration ----- */
@@ -1486,7 +1475,6 @@ static void init_settings(void)
     load_rotation_from_nvs();
     load_screensaver_from_nvs();
     load_calibration_prompt_from_nvs();
-    bsp_display_brightness_set(s_settings_ctx.settings.brightness);
     apply_rotation_to_display(true);
     settings_restore_time_from_nvs();
 }
