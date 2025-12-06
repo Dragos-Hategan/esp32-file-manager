@@ -14,6 +14,19 @@ void styles_build_button(lv_obj_t *button)
     lv_obj_set_style_text_color(button, UI_COLOR_TEXT, LV_PART_MAIN);
 }
 
+void styles_build_switch(lv_obj_t *switch_button)
+{
+    if (!switch_button) {
+        return;
+    }
+    lv_obj_set_style_bg_color(switch_button, UI_COLOR_CARD, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(switch_button, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(switch_button, UI_COLOR_ACCENT_BLUE, LV_PART_KNOB);
+    lv_obj_set_style_border_color(switch_button, UI_COLOR_BUTTON_BORDER, LV_PART_KNOB);
+    lv_obj_set_style_bg_color(switch_button, UI_COLOR_INDICATOR_OFF, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(switch_button, 2, LV_PART_KNOB);  
+}
+
 void styles_build_msgbox(lv_obj_t *mbox)
 {
     if (!mbox) {
