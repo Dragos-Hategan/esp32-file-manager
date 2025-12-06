@@ -410,6 +410,7 @@ static esp_err_t run_5point_touch_calibration(bool calibration_found)
     if (indev)
     {
         bsp_display_lock(0);
+        lv_obj_clean(lv_screen_active());
         lv_indev_enable(indev, true);
         bsp_display_unlock();
     }
