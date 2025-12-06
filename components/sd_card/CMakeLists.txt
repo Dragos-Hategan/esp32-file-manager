@@ -8,8 +8,9 @@ idf_component_register(
     PRIV_REQUIRES
         esp_driver_sdspi
         esp_hw_support  
-        settings
         nvs_flash       
+        settings
+        styles
         fatfs           
         sdmmc
 )

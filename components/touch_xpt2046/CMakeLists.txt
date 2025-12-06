@@ -12,4 +12,5 @@ idf_component_register(
         nvs_flash
         settings
         freertos
+        styles
 )
