@@ -4,7 +4,9 @@ idf_component_register(
     INCLUDE_DIRS
         "include"
     REQUIRES
-        esp_bsp_generic
         esp_common
         lvgl
+    PRIV_REQUIRES
+        esp_bsp_generic
+        styles
 )
