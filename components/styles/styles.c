@@ -1,5 +1,10 @@
 #include "styles.h"
 
+static inline lv_style_selector_t style_sel(lv_part_t part, lv_state_t state)
+{
+    return (lv_style_selector_t)((lv_style_selector_t)part | (lv_style_selector_t)state);
+}
+
 void styles_build_button(lv_obj_t *button)
 {
     if (!button) {
@@ -12,6 +17,32 @@ void styles_build_button(lv_obj_t *button)
     lv_obj_set_style_shadow_width(button, 0, LV_PART_MAIN);
     lv_obj_set_style_text_color(button, UI_COLOR_TEXT_DARK, LV_PART_MAIN);
     lv_obj_set_style_text_color(button, UI_COLOR_TEXT_DARK, LV_PART_MAIN);
+}
+
+void styles_build_dropdown(lv_obj_t *dropdown)
+{
+    if (dropdown) {
+        lv_obj_set_style_bg_color(dropdown, UI_COLOR_CARD_DARK, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(dropdown, UI_COLOR_BORDER_DARK, LV_PART_SCROLLBAR);
+
+        lv_obj_set_style_bg_opa(dropdown, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_text_color(dropdown, UI_COLOR_TEXT_DARK, 0);
+
+        /* Subtle selection: keep base bg, just a 1px accent border on selected item */
+        lv_obj_set_style_bg_opa(dropdown, LV_OPA_TRANSP, style_sel(LV_PART_SELECTED, LV_STATE_CHECKED));
+        lv_obj_set_style_bg_opa(dropdown, LV_OPA_TRANSP, style_sel(LV_PART_SELECTED, LV_STATE_CHECKED | LV_STATE_PRESSED));
+        lv_obj_set_style_border_color(dropdown, UI_COLOR_BUTTON_BORDER_DARK, style_sel(LV_PART_SELECTED, LV_STATE_CHECKED));
+        lv_obj_set_style_border_color(dropdown, UI_COLOR_BUTTON_BORDER_DARK, style_sel(LV_PART_SELECTED, LV_STATE_CHECKED | LV_STATE_PRESSED));
+        lv_obj_set_style_border_width(dropdown, 1, style_sel(LV_PART_SELECTED, LV_STATE_CHECKED));
+        lv_obj_set_style_border_width(dropdown, 1, style_sel(LV_PART_SELECTED, LV_STATE_CHECKED | LV_STATE_PRESSED));
+        lv_obj_set_style_text_color(dropdown, UI_COLOR_TEXT_DARK, style_sel(LV_PART_SELECTED, LV_STATE_CHECKED));
+        lv_obj_set_style_text_color(dropdown, UI_COLOR_TEXT_DARK, style_sel(LV_PART_SELECTED, LV_STATE_CHECKED | LV_STATE_PRESSED));
+
+        lv_obj_set_style_border_color(dropdown, UI_COLOR_BORDER_DARK, LV_PART_SCROLLBAR);
+        lv_obj_set_style_border_color(dropdown, UI_COLOR_BORDER_DARK, LV_PART_MAIN);
+
+        lv_obj_set_style_border_width(dropdown, 1, LV_PART_MAIN);
+    }
 }
 
 void styles_build_switch(lv_obj_t *switch_button)

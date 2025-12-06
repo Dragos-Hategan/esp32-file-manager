@@ -1556,7 +1556,7 @@ static esp_err_t settings_build_date_time_dialog(settings_ctx_t *ctx)
     lv_obj_t *dlg = lv_obj_create(overlay);
     lv_obj_set_style_radius(dlg, 12, 0);
     lv_obj_set_style_pad_all(dlg, 6, 0);
-    lv_obj_set_style_pad_gap(dlg, 4, 0);
+    lv_obj_set_style_pad_gap(dlg, 6, 0);
     //lv_obj_set_style_pad_bottom(dlg, 90, 0); /* leave room when keyboard appears */
     lv_obj_set_size(dlg, lv_pct(82), lv_pct(69));
     lv_obj_set_flex_flow(dlg, LV_FLEX_FLOW_COLUMN);
@@ -1689,7 +1689,7 @@ static esp_err_t settings_build_date_time_dialog(settings_ctx_t *ctx)
     lv_obj_set_style_pad_all(row_actions, 0, 0);
     lv_obj_set_width(row_actions, LV_PCT(100));
     lv_obj_set_height(row_actions, LV_SIZE_CONTENT);
-    lv_obj_set_style_margin_top(row_actions, 10, 0);
+    lv_obj_set_style_margin_top(row_actions, 8, 0);
     lv_obj_add_flag(row_actions, LV_OBJ_FLAG_EVENT_BUBBLE);
 
     lv_obj_t *apply_btn = lv_button_create(row_actions);

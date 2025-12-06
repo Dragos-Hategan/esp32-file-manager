@@ -21,6 +21,7 @@ extern "C" {
 void styles_build_button(lv_obj_t *button);
 void styles_build_switch(lv_obj_t *switch_button);
 void styles_build_textarea(lv_obj_t *textarea);
+void styles_build_dropdown(lv_obj_t *dropdown);
 void styles_build_msgbox(lv_obj_t *mbox);
 void styles_build_keyboard(lv_obj_t *kbd);
 

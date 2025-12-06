@@ -3,13 +3,14 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include "lvgl/src/libs/tjpgd/tjpgd.h"
+#include "lvgl/src/misc/lv_fs.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_heap_caps.h"
 #include "bsp/esp-bsp.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "esp_heap_caps.h"
-#include "esp_lcd_panel_ops.h"
-#include "lvgl/src/libs/tjpgd/tjpgd.h"
-#include "lvgl/src/misc/lv_fs.h"
+#include "styles.h"
 
 #define TAG "jpg_viewer"
 #define IMG_VIEWER_MAX_PATH 256
@@ -57,10 +58,8 @@ static void jpg_viewer_destroy_active(jpg_viewer_ctx_t *ctx);
  * in the top-right corner. The close button is wired to jpg_viewer_on_close().
  *
  * @param ctx  Pointer to the viewer context to populate.
- * @param path Path to the image file (currently unused in UI creation but
- *             kept for potential future use).
  */
-static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx, const char *path);
+static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx);
 
 /**
  * @brief Render the JPEG at the given path to the display panel.
@@ -179,7 +178,7 @@ esp_err_t jpg_viewer_open(const jpg_viewer_open_opts_t *opts)
     }
 
     ctx->previous_screen = lv_screen_active();
-    jpg_viewer_build_ui(ctx, opts->path);
+    jpg_viewer_build_ui(ctx);
 
     /* Load the screen before drawing so LVGL flushes its background/UI first */
     lv_screen_load(ctx->screen);
@@ -224,11 +223,12 @@ static void jpg_viewer_destroy_active(jpg_viewer_ctx_t *ctx)
     jpg_viewer_reset(ctx);
 }
 
-static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx, const char *path)
+static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx)
 {
     ctx->screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(ctx->screen, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_color(ctx->screen, UI_COLOR_BG_DARK, 0);
     lv_obj_set_style_bg_opa(ctx->screen, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_text_color(ctx->screen, UI_COLOR_TEXT_DARK, 0);
     lv_obj_set_style_pad_all(ctx->screen, 0, 0);
 
     ctx->image = lv_image_create(ctx->screen);
@@ -236,13 +236,16 @@ static void jpg_viewer_build_ui(jpg_viewer_ctx_t *ctx, const char *path)
 
     lv_obj_t *close_btn = lv_button_create(ctx->screen);
     ctx->close_btn = close_btn;
-    lv_obj_remove_style_all(close_btn);
+    //lv_obj_remove_style_all(close_btn);
     lv_obj_set_size(close_btn, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_pad_all(close_btn, 3, 0);
     lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
+    styles_build_button(close_btn);
+    lv_obj_set_style_radius(close_btn, 20, 0); // enough radius to make the button a circle
     lv_obj_add_event_cb(close_btn, jpg_viewer_on_close, LV_EVENT_CLICKED, ctx);
     lv_obj_t *close_lbl = lv_label_create(close_btn);
     lv_label_set_text(close_lbl, LV_SYMBOL_CLOSE);
+    lv_obj_set_style_text_color(close_lbl, UI_COLOR_TEXT_DARK, 0);
     lv_obj_center(close_lbl);
 }
 

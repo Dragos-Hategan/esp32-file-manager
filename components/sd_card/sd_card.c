@@ -10,6 +10,7 @@
 #include "lvgl.h"
 #include "sdmmc_cmd.h"
 #include "settings.h"
+#include "styles.h"
 
 #define SDSPI_RETRY_UI_STEP_MS  50U
 #define SDSPI_RETRY_DELAY_MS    500U
@@ -274,6 +275,7 @@ static void sdspi_retry_wait_for_confirmation(void)
 
     lv_obj_t *layer = lv_layer_top();
     lv_obj_t *mbox = lv_msgbox_create(layer);
+    styles_build_msgbox(mbox);
     lv_obj_set_style_max_width(mbox, lv_pct(80), 0);
     lv_obj_center(mbox);
 
@@ -281,9 +283,11 @@ static void sdspi_retry_wait_for_confirmation(void)
     lv_label_set_text(label, "Check SD card connection and hit OK");
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(label, UI_COLOR_TEXT_DARK, 0);
     lv_obj_set_width(label, lv_pct(100));
 
     lv_obj_t *btn = lv_msgbox_add_footer_button(mbox, "OK");
+    styles_build_button(btn);
     lv_obj_add_event_cb(btn, sdspi_retry_prompt_event_cb, LV_EVENT_CLICKED, &ctx);
 
     lv_obj_invalidate(mbox);
@@ -414,10 +418,10 @@ static void sdspi_retry_ui_create(sdspi_retry_ui_t *ui, uint32_t total_duration_
     lv_obj_set_style_pad_all(container, 16, 0);
     lv_obj_set_style_pad_row(container, 12, 0);
     lv_obj_set_style_radius(container, 12, 0);
-    lv_obj_set_style_bg_color(container, lv_color_hex(0x202126), 0);
+    lv_obj_set_style_bg_color(container, UI_COLOR_CARD_DARK, 0);
     lv_obj_set_style_bg_opa(container, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(container, 2, 0);
-    lv_obj_set_style_border_color(container, lv_color_hex(0x3a3d45), 0);
+    lv_obj_set_style_border_color(container, UI_COLOR_BORDER_DARK, 0);
     lv_obj_set_width(container, lv_pct(80));
     lv_obj_set_height(container, LV_SIZE_CONTENT);
     lv_obj_center(container);
@@ -430,7 +434,7 @@ static void sdspi_retry_ui_create(sdspi_retry_ui_t *ui, uint32_t total_duration_
 
     lv_obj_t *message = lv_label_create(container);
     lv_label_set_long_mode(message, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_color(message, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_text_color(message, UI_COLOR_TEXT_DARK, 0);
     lv_obj_set_style_text_align(message, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(message, lv_pct(100));
     lv_label_set_text(message, "SD card failed, retrying...");
@@ -441,13 +445,14 @@ static void sdspi_retry_ui_create(sdspi_retry_ui_t *ui, uint32_t total_duration_
     lv_arc_set_bg_angles(arc, 0, 360);
     lv_arc_set_rotation(arc, 270);
     lv_arc_set_value(arc, 0);
+    lv_obj_set_style_bg_color(arc, UI_COLOR_INDICATOR_OFF_DARK, LV_PART_INDICATOR | LV_STATE_DEFAULT);
     lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
     lv_obj_center(arc);
 
     lv_obj_t *attempt = lv_label_create(container);
     lv_obj_set_width(attempt, lv_pct(100));
     lv_obj_set_style_text_align(attempt, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_color(attempt, lv_color_hex(0xa0a0a0), 0);
+    lv_obj_set_style_text_color(attempt, UI_COLOR_TEXT_DARK, 0);
     lv_label_set_text_fmt(attempt, "Attempt 0/%d", SDSPI_MAX_RETRIES);
 
     ui->container = container;
